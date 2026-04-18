@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Entorno
+.venv/
+venv/
+*.env
+
+# Dataset (muy pesado para git, se comparte por separado)
+MaIA_Scoliosis_Dataset/
+
+# Pesos de modelos (pesados, se comparten por separado o via git-lfs)
+checkpoints/*.pth
+
+# MLflow runs (se regeneran)
+mlruns/
+
+# Outputs generados (se regeneran)
+outputs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Notebook anterior (referencia, no parte del proyecto)
+Laboratorio_sumativo_escoliosis_.ipynb
+spine_model.keras
+resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5
+
+# PDF de referencia
+*.pdf
