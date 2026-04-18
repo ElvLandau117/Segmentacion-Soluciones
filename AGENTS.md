@@ -140,15 +140,60 @@ Algunos ground truth = ~90 grados exactos (limite matematico del arctan). Docume
 - [ ] Paneles de explicabilidad
 
 ### Metricas (se actualiza al completar entrenamientos)
-| Modelo | Test Dice | Test IoU | PixAcc | Cobb MAE | Notas |
-|--------|-----------|----------|--------|----------|-------|
-| unet_mit_b3 (transformer) | 0.3157 | 0.2323 | 0.9578 | — | Early stop epoch 62 (best=42) |
-| **manet_mit_b5 (transformer)** | **0.3271** | **0.2383** | **0.9594** | — | Early stop epoch 76 (best=56). MEJOR HASTA AHORA |
-| unet_resnet50 (CNN) | 0.2691 | 0.1883 | 0.9541 | — | Early stop epoch 55 (best=35). PEOR que transformers! |
-| unet_efficientnet_b4 (CNN) | — | — | — | — | Entrenando... |
-| deeplabv3plus_resnet50 (CNN) | — | — | — | — | Pendiente |
+### TABLA FINAL — 5 MODELOS MULTICLASE ENTRENADOS
 
-**Hallazgo importante:** Contrario a la hipotesis inicial, los transformers (MiT) estan rindiendo MEJOR que las CNNs en este dataset pequeno. El self-attention global parece ser efectivo incluso con 174 imagenes de entrenamiento.
+| Ranking | Modelo | Paradigma | Test Dice | Test IoU | PixAcc |
+|---------|--------|-----------|-----------|----------|--------|
+| 🥇 | **deeplabv3plus_resnet50** | CNN multi-escala (ASPP) | **0.3378** | **0.2556** | **0.9596** |
+| 🥈 | manet_mit_b5 | Transformer + atencion dual | 0.3271 | 0.2383 | 0.9594 |
+| 🥉 | unet_mit_b3 | Transformer (SegFormer) | 0.3157 | 0.2323 | 0.9578 |
+| 4° | unet_resnet50 | CNN baseline | 0.2691 | 0.1883 | 0.9541 |
+| 5° | unet_efficientnet_b4 | CNN eficiente (tablet) | 0.2189 | 0.1542 | 0.9548 |
+
+### COBB ANGLE MAE (grados) — eval en casos de escoliosis del test set
+
+| Modelo | Metodo | MAE | Correlacion |
+|--------|--------|-----|-------------|
+| unet_efficientnet_b4 (binary) | Skeleton | 23.0 | 0.66 |
+| unet_resnet50 (binary) | Skeleton | 25.5 | 0.56 |
+| unet_mit_b3 (multi) | Endplate | 28.2 | 0.27 |
+| unet_efficientnet_b4 (multi) | Endplate | 26.8 | 0.20 |
+| unet_resnet50 (multi) | Endplate | 39.4 | -0.12 |
+| manet_mit_b5 (multi) | Endplate | 42.0 | -0.20 |
+| deeplabv3plus (multi) | Endplate | 45.4 | -0.20 |
+
+### HALLAZGOS IMPORTANTES
+
+1. **DeepLabV3+ supero a los transformers** (contrario a hipotesis inicial)
+   - ASPP con convoluciones atrous captura contexto multi-escala
+   - Mejor para vertebras que varian mucho en tamano (cervicales vs lumbares)
+   - No necesito self-attention global
+
+2. **Transformers quedaron 2° y 3°** — buen desempeno pero no ganaron
+   - Dataset pequeno (174 imgs) limita el aprendizaje de atencion
+   - Aun asi supera a U-Net+ResNet50 clasico
+
+3. **Cobb angle: metodo binario (skeleton) gana** al metodo multiclase
+   - Errores en segmentacion multiclase se acumulan al calcular Cobb
+   - Metodo binario es mas robusto
+   - Para deploy clinico, usar binary para Cobb + multiclass para visualizacion
+
+4. **Per-class Dice** (del mejor modelo, DeepLabV3+):
+   - C7: 0.69, T1: 0.66, L5: 0.41 (buenas)
+   - C4: 0.11, C3: 0.00 (no detectadas - vertebras muy raras en dataset)
+   - Desbalance extremo limita el aprendizaje de clases raras
+
+### CICLO 3 COMPLETADO
+
+- [x] AGENTS.md creado (persistencia spec-driven)
+- [x] Git inicializado con .gitignore
+- [x] Los 5 modelos multiclase entrenados
+- [x] Evaluacion comparativa completada
+- [x] Pesos exportados inference-only (838 MB total, 66% reduccion)
+- [x] Paquete para equipo (OneDrive): paquete_equipo_onedrive.zip (776 MB)
+- [x] Documentacion completa (INSTRUCCIONES_EQUIPO.md, RESULTADOS.md)
+- [x] Notebook final (03_informe_final.ipynb) estilo semestre pasado
+- [x] README.md actualizado con resultados finales
 
 ---
 

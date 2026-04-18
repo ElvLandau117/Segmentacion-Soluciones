@@ -108,7 +108,7 @@ MULTICLASS_COLORS = {
 TRAIN_CONFIG = {
     # Data
     "image_size": 512,
-    "batch_size": 8,
+    "batch_size": 12,
     "num_workers": 4,
     "pin_memory": True,
 

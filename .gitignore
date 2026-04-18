@@ -14,8 +14,14 @@ venv/
 # Dataset (muy pesado para git, se comparte por separado)
 MaIA_Scoliosis_Dataset/
 
-# Pesos de modelos (pesados, se comparten por separado o via git-lfs)
+# Pesos de modelos (pesados, se comparten por separado via OneDrive)
 checkpoints/*.pth
+checkpoints_inference/
+paquete_equipo/
+paquete_equipo_onedrive.zip
+
+# Agentes y configuracion IDE
+.claude/
 
 # MLflow runs (se regeneran)
 mlruns/

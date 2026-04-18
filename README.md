@@ -115,7 +115,10 @@ pip install -r requirements.txt
 > **Importante:** El dataset y los pesos NO están en el repositorio por tamaño y restricciones de propiedad intelectual.
 
 1. **Dataset:** Solicitar al profesor la carpeta `MaIA_Scoliosis_Dataset/` y colocarla en la raíz del proyecto
-2. **Pesos pre-entrenados:** Solicitar al líder del equipo la carpeta `checkpoints/` y colocarla en la raíz del proyecto
+2. **Pesos pre-entrenados:** Descargar desde el enlace de OneDrive compartido por el líder del equipo:
+   - Archivo: `paquete_equipo_onedrive.zip` (~776 MB)
+   - Contiene los 5 modelos multiclase + documentación
+   - Descomprimir y mover la carpeta `checkpoints/` a la raíz del proyecto
 
 Estructura esperada después:
 ```
@@ -386,22 +389,30 @@ En escoliosis severa, las vértebras rotan axialmente causando **superposición 
 
 ## Resultados Obtenidos
 
-### Segmentación multiclase (24 clases de vértebras)
+### Segmentación multiclase (24 clases de vértebras) — Test Set
 
-| Modelo | Test Dice | Test IoU | PixAcc | Notas |
-|--------|-----------|----------|--------|-------|
-| **MAnet + MiT-B5** | **0.3271** | **0.2383** | **0.9594** | **Mejor resultado** |
-| U-Net + MiT-B3 | 0.3157 | 0.2323 | 0.9578 | Transformer más ligero |
-| U-Net + ResNet50 | 0.2691 | 0.1883 | 0.9541 | CNN baseline |
-| U-Net + EfficientNet-B4 | En entrenamiento | — | — | CNN eficiente |
-| DeepLabV3+ + ResNet50 | Pendiente | — | — | CNN multi-escala |
+| Ranking | Modelo | Paradigma | Test Dice | Test IoU | PixAcc | Parámetros |
+|---------|--------|-----------|-----------|----------|--------|------------|
+| 🥇 | **DeepLabV3+ + ResNet50** | CNN multi-escala (ASPP) | **0.3378** | **0.2556** | **0.9596** | 26.7M |
+| 🥈 | MAnet + MiT-B5 | Transformer + atención dual | 0.3271 | 0.2383 | 0.9594 | 92.2M |
+| 🥉 | U-Net + MiT-B3 | Transformer (SegFormer) | 0.3157 | 0.2323 | 0.9578 | 47.4M |
+| 4° | U-Net + ResNet50 | CNN clásica | 0.2691 | 0.1883 | 0.9541 | 32.5M |
+| 5° | U-Net + EfficientNet-B4 | CNN eficiente (tablet-ready) | 0.2189 | 0.1542 | 0.9548 | 20.2M |
 
 ### Hallazgo importante
-**Contrario a la hipótesis inicial, los transformers (MiT) rinden MEJOR que las CNNs** incluso con un dataset pequeño (174 imágenes de entrenamiento). El self-attention global es efectivo para capturar la estructura anatómica vertebral.
+**DeepLabV3+ superó a los transformers**. Su módulo ASPP (convoluciones atrous multi-escala) captura contexto a diferentes zoom en paralelo — exactamente lo que se necesita para vértebras que varían mucho en tamaño (cervicales pequeñas vs lumbares grandes). Este resultado es contrario a la hipótesis inicial de que los transformers ganarían por su self-attention global.
 
-### Ángulo de Cobb
+### Ángulo de Cobb (evaluación en casos de escoliosis)
 
-Pendiente: cálculo con todos los modelos finalizados. Se reporta MAE, correlación de Pearson y % de casos con error < 5°.
+| Modelo | Método | MAE (°) | Correlación Pearson |
+|--------|--------|---------|---------------------|
+| U-Net + EfficientNet-B4 | Binario (skeleton) | **23.0** | **0.66** |
+| U-Net + ResNet50 | Binario (skeleton) | 25.5 | 0.56 |
+| U-Net + MiT-B3 | Multiclase (endplate) | 28.2 | 0.27 |
+| U-Net + EfficientNet-B4 | Multiclase (endplate) | 26.8 | 0.20 |
+| U-Net + ResNet50 | Multiclase (endplate) | 39.4 | -0.12 |
+
+**Observación**: el método binario (basado en esqueletización) da mejor MAE de Cobb que el multiclase, probablemente porque errores en la identificación de vértebras individuales se acumulan al calcular el ángulo desde placas vertebrales.
 
 ---
 
