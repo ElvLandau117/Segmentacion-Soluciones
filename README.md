@@ -1,6 +1,24 @@
+---
+title: Spine Segmentation for Scoliosis
+emoji: 🦴
+colorFrom: blue
+colorTo: red
+sdk: gradio
+sdk_version: 4.44.0
+app_file: app.py
+pinned: false
+license: apache-2.0
+short_description: Vertebrae segmentation + automatic Cobb angle + Grad-CAM explainability
+suggested_hardware: cpu-basic
+---
+
 # Segmentación Automática de Columna Vertebral y Vértebras
 
 **Proyecto Final — Maestría en Inteligencia Artificial · Universidad de los Andes**
+
+> Este repositorio funciona como código fuente en GitHub **y** como un Space
+> ejecutable en Hugging Face. El bloque YAML de arriba es la metadata del Space
+> (lo lee HF Hub; GitHub lo renderiza como una tabla discreta).
 
 Sistema de deep learning para segmentar la columna vertebral y vértebras
 individuales en radiografías AP, calcular el ángulo de Cobb automáticamente y
@@ -13,12 +31,13 @@ apoyo al radiólogo, no como reemplazo.
 
 | Recurso | URL |
 |---------|-----|
-| **App desplegada** | _por completar tras el deploy de Hetzner — ver [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)_ |
-| **Repositorio (este)** | https://github.com/ElvLandau117/Segmentacion-Soluciones |
-| **Pesos del modelo** | Hugging Face Hub — ver [`docs/HUGGINGFACE_SETUP.md`](docs/HUGGINGFACE_SETUP.md) |
+| **App desplegada (oficial)** | `https://huggingface.co/spaces/<usuario>/spine-segmentation` — _por completar tras crear el Space; ver [`docs/HF_SPACES_SETUP.md`](docs/HF_SPACES_SETUP.md)_ |
+| **Repositorio GitHub** | https://github.com/ElvLandau117/Segmentacion-Soluciones |
+| **Pesos del modelo** | `https://huggingface.co/<usuario>/spine-checkpoints` — ver [`docs/HUGGINGFACE_SETUP.md`](docs/HUGGINGFACE_SETUP.md) |
 | **Dataset** | MaIA Scoliosis (propiedad U. Andes — solicitarlo al líder del proyecto) |
 | **Rúbrica oficial** | [`requisitos_universidad/`](requisitos_universidad/) |
 | **Memoria del proyecto** | [`AGENTS.md`](AGENTS.md) |
+| **Despliegue alternativo (Hetzner / VPS)** | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 
 ---
 
@@ -51,25 +70,45 @@ Todo corre en CPU (no requiere GPU para inferencia) y se despliega como un
 
 ## 2. Arquitectura del despliegue
 
+### Oficial — Hugging Face Spaces (gratis, sin servidor propio)
+
 ```
 USUARIO (medico, jurado, compañero)
-   │ HTTPS (Let's Encrypt automatico)
+   │ HTTPS gestionado por HF
    ▼
-CADDY container        ← reverse proxy + SSL automatico
-   │ HTTP interno
+huggingface.co/spaces/<usuario>/spine-segmentation
+   │ runtime: Gradio SDK, CPU Basic gratis (2 vCPU, 16 GB RAM)
+   │ entrypoint: app.py (expone `demo`)
    ▼
-APP container          ← Gradio + DeepLabV3+ (102 MB) + UNet binario
-   │
+APP (Gradio + DeepLabV3+ + UNet binario)
+   │ boot: ensure_weights() -> snapshot_download desde HF Hub
    ▼
-/data/checkpoints (volumen)  ← cache local de los .pth bajados de HF Hub
+huggingface.co/<usuario>/spine-checkpoints    ← repo de pesos (mismo HF)
 ```
 
 - **Modelo en producción:** `DeepLabV3+ ResNet50` (ganador del Ciclo 3 con
   Dice = 0.3378) para vértebras + `UNet ResNet50` binario para Cobb.
-- **Pesos:** se descargan de [Hugging Face Hub](https://huggingface.co)
-  al primer arranque y se cachean en volumen persistente.
-- **HTTPS:** automático vía Let's Encrypt. Funciona con dominio propio o con
-  el truco gratis `<ip-con-guiones>.nip.io`.
+- **Pesos:** repo separado en HF Hub. Se descargan al primer arranque del
+  Space y se cachean en su storage persistente (50 GB gratis).
+- **HTTPS:** automático y transparente, gestionado por HF.
+- **URL:** `https://huggingface.co/spaces/<usuario>/spine-segmentation`.
+- **Sleep:** tras 48 h sin uso el Space se duerme; despierta en 30-60 s al
+  primer click. Para evaluación: abrir la URL 1 minuto antes para calentarlo.
+
+### Alternativa — Docker + Caddy en VPS (Hetzner)
+
+Para producción real o si se quiere evitar el sleep:
+
+```
+USUARIO ──HTTPS──▶ CADDY (Let's Encrypt) ──HTTP──▶ APP container
+                                                       │
+                                                       ▼
+                                              /data/checkpoints
+                                              (cache de HF Hub)
+```
+
+Stack en `docker-compose.yml` + `Caddyfile`. Runbook en
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ---
 
@@ -127,24 +166,57 @@ Una radiografía AP de columna completa. Ejemplos válidos:
 
 ## 5. Cómo reproducir el despliegue
 
-### TL;DR
+### Opción A — Hugging Face Spaces (oficial y recomendada)
+
+Esta es la URL que entregamos al jurado. **Gratis**, sin servidor propio, HTTPS
+gestionado por HF, integrado con el repo de pesos.
+
 ```bash
-# En el servidor (Ubuntu/Debian con Docker + compose v2):
+# 1. Crear cuenta + token en https://huggingface.co (5 min)
+# 2. Subir los pesos al repo de HF Hub (una sola vez):
+huggingface-cli login
+python scripts/upload_weights.py --file checkpoints/deeplabv3plus_resnet50_multiclass_best.pth
+python scripts/upload_weights.py --file checkpoints/unet_resnet50_binary_best.pth
+
+# 3. Crear el Space en https://huggingface.co/new-space
+#    SDK: Gradio  |  Hardware: CPU Basic (free)
+# 4. Push del codigo al Space:
+git remote add hf https://huggingface.co/spaces/<usuario>/spine-segmentation
+git push hf main
+
+# 5. En Settings del Space -> Variables: setear HF_REPO_ID=<usuario>/spine-checkpoints
+```
+
+HF construye el Space, descarga los pesos y la URL queda en
+`https://huggingface.co/spaces/<usuario>/spine-segmentation`.
+
+Runbook detallado paso a paso: [`docs/HF_SPACES_SETUP.md`](docs/HF_SPACES_SETUP.md).
+Cualquier evaluador puede **duplicar el Space en 1 click** ("Duplicate Space" en
+HF) para reproducirlo bajo su propia cuenta.
+
+### Opción B — Hetzner / VPS propio (alternativa avanzada)
+
+Si en algún momento queremos evitar el "sleep" de HF Spaces o tener control
+total del servidor, dejamos preparado un stack `docker compose` con Caddy
+para SSL automático.
+
+```bash
 git clone https://github.com/ElvLandau117/Segmentacion-Soluciones.git
 cd Segmentacion-Soluciones
 cp .env.example .env
-nano .env                                   # ajustar HF_REPO_ID y DOMAIN
+nano .env                                   # HF_REPO_ID + DOMAIN
 bash scripts/deploy_hetzner.sh
 ```
 
-El script construye la imagen, levanta el stack y espera al healthcheck.
+Runbook completo: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
-### Documentos detallados
-- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — runbook completo de Hetzner,
-  troubleshooting, operaciones comunes, acceptance checklist.
-- [`docs/HUGGINGFACE_SETUP.md`](docs/HUGGINGFACE_SETUP.md) — crear cuenta en
-  HF, subir los `.pth` con `scripts/upload_weights.py`, cómo intercambiar
-  pesos en el deploy.
+### Documentos relacionados
+
+- [`docs/HUGGINGFACE_SETUP.md`](docs/HUGGINGFACE_SETUP.md) — crear cuenta HF,
+  subir los `.pth`, intercambiar pesos sin re-deploy.
+- [`docs/HF_SPACES_SETUP.md`](docs/HF_SPACES_SETUP.md) — todo el flujo del Space
+  paso a paso.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — alternativa Hetzner.
 
 ---
 
