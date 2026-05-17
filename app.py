@@ -38,6 +38,9 @@ demo = create_app(
 
 
 if __name__ == "__main__":
-    # Plain `python app.py` — let Gradio pick its own defaults.
-    # HF Spaces sets PORT/host internally; locally Gradio defaults to 7860.
-    demo.queue().launch()
+    # Bind to 0.0.0.0 explicitly. HF Spaces sometimes re-invokes app.py as a
+    # script (not import) after a worker crash; without server_name="0.0.0.0"
+    # Gradio refuses to bind in the container and raises:
+    #   "When localhost is not accessible, a shareable link must be created"
+    # Local runs also work — Gradio accepts 0.0.0.0 and binds to all interfaces.
+    demo.queue().launch(server_name="0.0.0.0", server_port=7860)
