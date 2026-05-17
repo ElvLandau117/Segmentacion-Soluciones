@@ -2,7 +2,9 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-17 | Ciclos completados: 1, 2, 3, 4 (codigo + infra; deploy real pendiente de ejecucion) | Proximo ciclo: 5 (Refinamiento + entrega)
+> Ultima actualizacion: 2026-05-17 PM | Ciclos completados: 1, 2, 3, 4 (✅ APP DESPLEGADA EN HF SPACES) | Proximo ciclo: 5 (Refinamiento + entrega academica)
+>
+> **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 
 > **Si eres nuevo en el proyecto:** sigue la [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
 > antes de hacer cualquier cambio.
@@ -341,3 +343,11 @@ Orden corto:
 | 2026-05-17 | Usuario no-root (uid 1000) en el container | Buena practica de seguridad estandar. Tiene su home y permisos chown sobre /data/checkpoints. |
 | 2026-05-17 | Crear CLAUDE.md en raiz como pointer a AGENTS.md | AGENTS.md es la fuente publica auditable (estandar agents-md.io). CLAUDE.md existe solo para que Claude Code lo cargue automaticamente. Una sola fuente de verdad. |
 | 2026-05-17 | Reorganizar raiz en carpetas tematicas (requisitos_universidad/, docs/metodologia/, archive/) | PDFs sueltos en raiz era ruido. Las nuevas carpetas tienen README explicativo y politicas claras. Los PDFs de la rubrica oficial SI se commitean (excepcion en .gitignore) por ser el contrato academico. |
+| 2026-05-17 PM | **Pivote: HF Spaces como hosting principal (no Hetzner)** | Gratis, sin servidor propio, integrado con HF Hub de pesos. URL `huggingface.co/spaces/ElvLandau/spine-segmentation`. La infra Hetzner queda commiteada como "deploy alternativo" pero NO es el camino oficial. |
+| 2026-05-17 PM | Pin `python_version: "3.11"` en YAML del Space | Python 3.13 (default HF) elimino `audioop` del stdlib; `pydub` (dep de gradio) lo necesita. |
+| 2026-05-17 PM | Upgrade `gradio` a 5.x con `sdk_version: 5.0.1` | gradio 4.44 venia con `gradio-client 1.3` que tiene bug `TypeError 'bool not iterable'` en `api_info()`. La 5.x trae client 1.5+ con el fix. |
+| 2026-05-17 PM | `create_app()` usa sentinel `None` y resuelve via config | Los defaults hardcoded `"unet_resnet50"` ignoraban `DEFAULT_MULTICLASS_MODEL`, causando mismatch al cargar pesos DeepLabV3+ en un Unet. La fuente de verdad es ahora `config.DEFAULT_*_MODEL` (env-driven). |
+| 2026-05-17 PM | `app.py` raiz hace `launch(server_name="0.0.0.0", server_port=7860)` | HF Spaces a veces re-invoca como script tras crash; sin `server_name="0.0.0.0"` el container no puede bind a localhost. |
+| 2026-05-17 PM | Crear repo de pesos `ElvLandau/spine-checkpoints` publico en HF Hub | 2 .pth subidos via `scripts/upload_weights.py`: DeepLabV3+ multiclase (102 MB) + UNet binario (124 MB) = 226 MB total. |
+| 2026-05-17 PM | Force push al Space autorizado (1 vez) | El Space tenia un README placeholder auto-creado por HF; sobrescribir era necesario y seguro porque el Space era brand-new sin colaboradores. NO se uso force push para GitHub. |
+| 2026-05-17 PM | LFS para PDFs oficiales | HF Spaces rechaza binarios no-LFS via su hook xet. Los 2 PDFs de Coursera quedaron en LFS en el branch `space-deploy` (solo para el push al Space; main de GitHub mantiene los blobs originales). |

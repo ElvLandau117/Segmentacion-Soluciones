@@ -20,13 +20,17 @@ herramientas de apoyo a medidas radiológicas.
 | Recurso | URL |
 |---------|-----|
 | **Repositorio GitHub** | https://github.com/ElvLandau117/Segmentacion-Soluciones |
-| **Aplicación desplegada** | _https://<ip-con-guiones>.nip.io_ — _completar tras el deploy_ |
-| **Pesos del modelo (Hugging Face Hub)** | _https://huggingface.co/<usuario>/spine-checkpoints_ — _completar_ |
-| **Documentación de despliegue** | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
+| **🚀 Aplicación desplegada** | **https://huggingface.co/spaces/ElvLandau/spine-segmentation** |
+| **Pesos del modelo (HF Hub)** | https://huggingface.co/ElvLandau/spine-checkpoints |
+| **Documentación de despliegue oficial** | [`docs/HF_SPACES_SETUP.md`](docs/HF_SPACES_SETUP.md) |
+| **Documentación despliegue alternativo (Hetzner)** | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 | **README principal** | [`README.md`](README.md) |
 | **Memoria del proyecto** | [`AGENTS.md`](AGENTS.md) |
 
 > **Acceso:** La aplicación es pública y no requiere credenciales.
+> **Nota sobre el sleep:** tras 48 h sin uso el Space se duerme; al primer
+> click despierta en 30-60 s. Si la evaluación es a una hora exacta, **abrir
+> la URL 1 minuto antes** para garantizar arranque inmediato.
 
 ---
 

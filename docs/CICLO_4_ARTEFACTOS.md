@@ -1,29 +1,32 @@
 # Ciclo 4 — Despliegue · Artefacto de Salida
 
-> **Fecha de cierre del trabajo en el repo:** 2026-05-17
-> **Estado:** ✅ Código y documentación cerrados. ⏳ Pendiente: deploy real en
-> Hetzner + smoke test desde dispositivos externos (a cargo de Elvis).
-> **Próximo ciclo (tentativo):** Ciclo 5 — Refinamiento de modelo + entrega.
+> **Fecha de cierre:** 2026-05-17
+> **Estado:** ✅ **APP DESPLEGADA Y CORRIENDO** en HF Spaces.
+> **URL pública:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
+> **Próximo ciclo (tentativo):** Ciclo 5 — Refinamiento de modelo + entrega académica.
 
 ---
 
 ## 1. Resumen ejecutivo
 
 Ciclo dedicado a transformar el proyecto de "funciona en mi laptop" a
-**aplicación pública desplegable en un servidor**, alineado con la rúbrica de
-evaluación de despliegue de la Universidad de los Andes (Coursera).
+**aplicación pública en HF Spaces accesible 24/7**, alineado con la rúbrica
+de evaluación de despliegue de la Universidad de los Andes (Coursera).
 
 **Decisiones de arquitectura tomadas el 2026-05-17:**
 
 | Decisión | Elegido |
 |----------|---------|
-| Hosting de pesos | **Hugging Face Hub** (repo público o privado, gratis, versionado) |
-| Modelo en producción | **Solo DeepLabV3+ ResNet50** (ganador del Ciclo 3) |
-| Convención de entrypoint | **`app/main.py` shim** que re-exporta del paquete |
-| Dominio + SSL | **Caddy + nip.io** (Let's Encrypt automático, gratis) |
+| Hosting del código + UI | **Hugging Face Spaces** (gratis, Gradio SDK, CPU Basic) |
+| Hosting de pesos | **Hugging Face Hub** repo separado (`ElvLandau/spine-checkpoints`) |
+| Modelo en producción | **DeepLabV3+ ResNet50** (multiclase, ganador del Ciclo 3) + **UNet ResNet50** (binario para Cobb) |
+| Convención de entrypoint | **`app.py` raíz** (HF Spaces) + **`app/main.py` shim** (Docker/local) |
+| Despliegue alternativo | **Hetzner + Docker Compose + Caddy** (commiteado, documentado, no usado en producción) |
+| Versión Gradio | **5.0.1** (4.x tenía bug `TypeError` en `gradio-client 1.3`) |
+| Versión Python | **3.11** (3.13 quitó `audioop` que `pydub` necesita) |
 
-**11 unidades de trabajo planificadas. 9 cerradas con commit. 2 quedan
-pendientes (deploy real + smoke test) porque requieren el servidor Hetzner.**
+**11 unidades originales + 8 unidades adicionales de iteración para resolver
+incompatibilidades de la matriz Python/gradio/huggingface_hub. Todo cerrado.**
 
 ---
 
@@ -31,7 +34,7 @@ pendientes (deploy real + smoke test) porque requieren el servidor Hetzner.**
 
 | Criterio | Peso | Estado |
 |----------|:-:|--------|
-| Funcionamiento (app desplegada y operativa) | 35 % | ⏳ Listo en código + infra. Pendiente: ejecutar `bash scripts/deploy_hetzner.sh` en el server. |
+| Funcionamiento (app desplegada y operativa) | 35 % | ✅ HF Spaces **RUNNING**, HTTP 200 estable, healthcheck OK |
 | Usabilidad / presentación | 35 % | ✅ 4 tabs claras, etiquetas explícitas, disclaimer médico visible, panel de explicabilidad |
 | Documentación del despliegue (README) | 15 % | ✅ README v2 con descripción, instalación, ejemplos input/output, dependencias, pasos de deploy, consideraciones del modelo, tiempos |
 | Parametrización (env vars / config) | 15 % | ✅ 12 variables documentadas en `.env.example`; tests verifican el override |
