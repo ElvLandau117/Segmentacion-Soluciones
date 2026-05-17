@@ -21,6 +21,98 @@ from spine_segmentation.deployment.weights import ensure_weights
 from spine_segmentation.evaluation.explainability import generate_confidence_map, generate_gradcam
 
 
+def build_results_text(
+    cobb_binary: dict | None,
+    cobb_multiclass: dict | None,
+    vertebrae_detected: list | None = None,
+) -> str:
+    """Render the multi-line Diagnosis Results panel.
+
+    Pure function (no I/O, no Gradio deps) so it can be unit-tested without
+    spinning up an app or loading a model. The Gradio predict() closure
+    feeds the output of this directly into the results Textbox.
+
+    Layout (sections are omitted when the corresponding data is missing):
+
+      === COBB ANGLE ===
+      Binary method:     XX.X deg  (more robust, recommended)
+      Multiclass method: YY.Y deg  (anatomical info: Upper=Cn, Lower=Tm)
+
+      CONCORDANCE: High agreement | Review recommended | Significant discrepancy
+          |Binary - Multiclass| = ZZ.Z deg
+
+      === ASSESSMENT (based on Binary) ===
+      Normal | Mild | Moderate | Severe
+
+      === VERTEBRAE DETECTED (N) ===
+      C7, T1, ...
+    """
+    binary_ok = bool(cobb_binary and cobb_binary.get("success"))
+    multi_ok = bool(cobb_multiclass and cobb_multiclass.get("success"))
+
+    lines: list[str] = ["=== COBB ANGLE ==="]
+    if binary_ok:
+        lines.append(
+            f"Binary method:     {cobb_binary['cobb_angle_deg']:5.1f} deg  (more robust, recommended)"
+        )
+    elif cobb_binary:
+        lines.append(
+            f"Binary method:     ERROR - {cobb_binary.get('error', 'unknown')}"
+        )
+
+    if multi_ok:
+        upper = cobb_multiclass.get("upper_end_vertebra", "N/A")
+        lower = cobb_multiclass.get("lower_end_vertebra", "N/A")
+        lines.append(
+            f"Multiclass method: {cobb_multiclass['cobb_angle_deg']:5.1f} deg  "
+            f"(anatomical info: Upper={upper}, Lower={lower})"
+        )
+    elif cobb_multiclass:
+        lines.append(
+            f"Multiclass method: ERROR - {cobb_multiclass.get('error', 'unknown')}"
+        )
+
+    # Agreement indicator (only when both methods succeeded)
+    if binary_ok and multi_ok:
+        diff = abs(cobb_binary["cobb_angle_deg"] - cobb_multiclass["cobb_angle_deg"])
+        if diff <= 5.0:
+            concordance = "High agreement - both methods coincide"
+        elif diff <= 15.0:
+            concordance = "Review recommended - methods differ slightly"
+        else:
+            concordance = "Significant discrepancy - specialist judgment required"
+        lines.append(f"\nCONCORDANCE: {concordance}")
+        lines.append(f"    |Binary - Multiclass| = {diff:.1f} deg")
+
+    # Severity assessment — binary is the source of truth on our data
+    # (binary MAE 23 deg with Pearson 0.66, vs multiclass MAE 26-45 deg with
+    # negative correlation in the worst case). Multiclass is fallback only.
+    assessment_source = None
+    if binary_ok:
+        assessment_source = ("Binary", cobb_binary["cobb_angle_deg"])
+    elif multi_ok:
+        assessment_source = ("Multiclass fallback", cobb_multiclass["cobb_angle_deg"])
+
+    if assessment_source is not None:
+        source_label, angle = assessment_source
+        if angle < 10:
+            assessment = "Normal (< 10 degrees)"
+        elif angle < 25:
+            assessment = "Mild scoliosis (10-25 degrees)"
+        elif angle < 40:
+            assessment = "Moderate scoliosis (25-40 degrees)"
+        else:
+            assessment = "Severe scoliosis (> 40 degrees)"
+        lines.append(f"\n=== ASSESSMENT (based on {source_label}) ===")
+        lines.append(assessment)
+
+    if vertebrae_detected:
+        lines.append(f"\n=== VERTEBRAE DETECTED ({len(vertebrae_detected)}) ===")
+        lines.append(", ".join(vertebrae_detected))
+
+    return "\n".join(lines)
+
+
 def create_app(
     binary_checkpoint: str = None,
     multiclass_checkpoint: str = None,
@@ -78,83 +170,11 @@ def create_app(
         multiclass_overlay = results.get("multiclass_overlay")
         cobb_vis = results.get("cobb_visualization")
 
-        # Build results text — dual-Cobb layout (binary + multiclass + agreement)
-        cobb_binary = results.get("cobb_binary")
-        cobb_multi = results.get("cobb_multiclass")
-        binary_ok = bool(cobb_binary and cobb_binary.get("success"))
-        multi_ok = bool(cobb_multi and cobb_multi.get("success"))
-
-        text_lines: list[str] = ["=== COBB ANGLE ==="]
-        if binary_ok:
-            text_lines.append(
-                f"Binary method:     {cobb_binary['cobb_angle_deg']:5.1f} deg  (more robust, recommended)"
-            )
-        elif cobb_binary:
-            text_lines.append(
-                f"Binary method:     ERROR - {cobb_binary.get('error', 'unknown')}"
-            )
-
-        if multi_ok:
-            upper = cobb_multi.get("upper_end_vertebra", "N/A")
-            lower = cobb_multi.get("lower_end_vertebra", "N/A")
-            text_lines.append(
-                f"Multiclass method: {cobb_multi['cobb_angle_deg']:5.1f} deg  "
-                f"(anatomical info: Upper={upper}, Lower={lower})"
-            )
-        elif cobb_multi:
-            text_lines.append(
-                f"Multiclass method: ERROR - {cobb_multi.get('error', 'unknown')}"
-            )
-
-        # Agreement indicator (only when both methods succeeded)
-        if binary_ok and multi_ok:
-            diff = abs(cobb_binary["cobb_angle_deg"] - cobb_multi["cobb_angle_deg"])
-            if diff <= 5.0:
-                concordance = "High agreement - both methods coincide"
-            elif diff <= 15.0:
-                concordance = "Review recommended - methods differ slightly"
-            else:
-                concordance = "Significant discrepancy - specialist judgment required"
-            text_lines.append(
-                f"\nCONCORDANCE: {concordance}"
-            )
-            text_lines.append(
-                f"    |Binary - Multiclass| = {diff:.1f} deg"
-            )
-
-        # Severity assessment — based on the BINARY Cobb (more robust on our data:
-        # MAE 23 deg + Pearson 0.66, vs multiclass MAE 26-45 deg with negative correlation
-        # in the worst case). The multiclass value above is kept as anatomical reference
-        # (which vertebrae make up the curve), not as the severity criterion.
-        assessment_source = None
-        if binary_ok:
-            assessment_source = ("Binary", cobb_binary["cobb_angle_deg"])
-        elif multi_ok:
-            # Fallback only if the binary method failed
-            assessment_source = ("Multiclass fallback", cobb_multi["cobb_angle_deg"])
-
-        if assessment_source is not None:
-            source_label, angle = assessment_source
-            if angle < 10:
-                assessment = "Normal (< 10 degrees)"
-            elif angle < 25:
-                assessment = "Mild scoliosis (10-25 degrees)"
-            elif angle < 40:
-                assessment = "Moderate scoliosis (25-40 degrees)"
-            else:
-                assessment = "Severe scoliosis (> 40 degrees)"
-            text_lines.append(
-                f"\n=== ASSESSMENT (based on {source_label}) ==="
-            )
-            text_lines.append(assessment)
-
-        # Vertebrae detected (anatomical reference)
-        vertebrae = results.get("vertebrae_detected", [])
-        if vertebrae:
-            text_lines.append(f"\n=== VERTEBRAE DETECTED ({len(vertebrae)}) ===")
-            text_lines.append(", ".join(vertebrae))
-
-        results_text = "\n".join(text_lines)
+        results_text = build_results_text(
+            cobb_binary=results.get("cobb_binary"),
+            cobb_multiclass=results.get("cobb_multiclass"),
+            vertebrae_detected=results.get("vertebrae_detected"),
+        )
 
         # Generate explainability panel
         explainability_img = None
