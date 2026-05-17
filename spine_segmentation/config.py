@@ -27,13 +27,15 @@ LABELS_DICT_JSON = DATASET_ROOT / "labels_dictionary.json"
 RADIOGRAPH_METRICS_CSV = METRICS_DIR / "radiograph_metrics.csv"
 
 # Output directories
-CHECKPOINTS_DIR = PROJECT_ROOT / "checkpoints"
+# CHECKPOINTS_DIR es overrideable via env var (en el container apunta a
+# /data/checkpoints, un volumen persistente donde HF cachea los .pth)
+CHECKPOINTS_DIR = Path(os.getenv("CHECKPOINTS_DIR", str(PROJECT_ROOT / "checkpoints")))
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 MLRUNS_DIR = PROJECT_ROOT / "mlruns"
 SPLITS_FILE = PROJECT_ROOT / "data_splits.json"
 
-# Ensure output directories exist
-CHECKPOINTS_DIR.mkdir(exist_ok=True)
+# Ensure output directories exist (idempotente)
+CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUTS_DIR.mkdir(exist_ok=True)
 
 # =============================================================================
@@ -186,3 +188,46 @@ MLFLOW_EXPERIMENT_NAME = "spine_segmentation"
 NUM_CLASSES_BINARY = 1       # spine vs background
 NUM_CLASSES_VERTEBRAE = 24   # 23 vertebrae + 1 other_structures + background = 24
 NUM_CLASSES_FULL = 36        # all original classes
+
+
+# =============================================================================
+# Deployment configuration (Ciclo 4) — overrideable via env vars
+# =============================================================================
+# Documented in .env.example. Read by app/main.py and inference.py.
+# Defaults are sensible for local development; the container injects
+# production values via docker-compose.
+
+# Network
+APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")
+APP_PORT: int = int(os.getenv("APP_PORT", "7860"))
+
+# Hugging Face Hub — weights repository
+# Example: "elvis/spine-checkpoints"
+HF_REPO_ID: str = os.getenv("HF_REPO_ID", "")
+HF_TOKEN: str = os.getenv("HF_TOKEN", "")  # only needed for private repos
+
+# Default models served in production (Ciclo 4 decision: DeepLabV3+ won)
+DEFAULT_MULTICLASS_MODEL: str = os.getenv("DEFAULT_MULTICLASS_MODEL", "deeplabv3plus_resnet50")
+DEFAULT_BINARY_MODEL: str = os.getenv("DEFAULT_BINARY_MODEL", "unet_resnet50")
+
+# Checkpoint filenames inside the HF repo
+# (these are what scripts/upload_weights.py uploads by default)
+DEFAULT_MULTICLASS_WEIGHT: str = os.getenv(
+    "DEFAULT_MULTICLASS_WEIGHT",
+    f"{DEFAULT_MULTICLASS_MODEL}_multiclass_best.pth",
+)
+DEFAULT_BINARY_WEIGHT: str = os.getenv(
+    "DEFAULT_BINARY_WEIGHT",
+    f"{DEFAULT_BINARY_MODEL}_binary_best.pth",
+)
+
+# Inference behavior
+INFERENCE_IMAGE_SIZE: int = int(os.getenv("INFERENCE_IMAGE_SIZE", "512"))
+
+# Medical disclaimer text (centralized so the UI and reports share wording)
+MEDICAL_DISCLAIMER: str = os.getenv(
+    "MEDICAL_DISCLAIMER",
+    "This tool is for educational and research purposes only. "
+    "It does NOT replace professional medical diagnosis. "
+    "Always consult a qualified radiologist or specialist.",
+)

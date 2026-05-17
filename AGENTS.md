@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-04-20 | Ciclos completados: 1, 2, 3 | Proximo ciclo: 4 (Despliegue)
+> Ultima actualizacion: 2026-05-17 | Ciclos completados: 1, 2, 3, 4 (codigo + infra; deploy real pendiente de ejecucion) | Proximo ciclo: 5 (Refinamiento + entrega)
 
 > **Si eres nuevo en el proyecto:** sigue la [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
 > antes de hacer cualquier cambio.
@@ -147,17 +147,33 @@ Algunos ground truth = ~90 grados exactos (limite matematico del arctan). Docume
 - [x] Notebook `03_informe_final.ipynb` estilo semestre anterior
 - [x] Artefacto formal: [`docs/CICLO_3_ARTEFACTOS.md`](docs/CICLO_3_ARTEFACTOS.md)
 
-### Ciclo 4 (proximo) — Despliegue
-- [ ] Validar Dockerfile actual
-- [ ] Optimizar tamano de imagen
-- [ ] Preparar deploy en Hetzner
-- [ ] Desplegar app web publicamente
-- [ ] Configurar Nginx + SSL (opcional)
-- [ ] Smoke test end-to-end
-- [ ] Documentar deployment
+### Ciclo 4 (codigo + infra cerrados — deploy real pendiente) — Despliegue
+- [x] Reorganizar carpetas (requisitos_universidad/, docs/metodologia/, archive/)
+- [x] Migrar pesos de OneDrive a Hugging Face Hub (script + guia)
+- [x] Parametrizar config.py con 12 env vars (.env.example documentado)
+- [x] app/ shim entrypoint (cumple convencion de la rubrica)
+- [x] Modulo weights.py con autodescarga desde HF Hub + cache
+- [x] Dockerfile v2 (multi-stage, usuario no-root, sin COPY checkpoints, healthcheck con curl)
+- [x] docker-compose.yml + Caddyfile (SSL automatico via Let's Encrypt + nip.io)
+- [x] Suite pytest (13 tests passing, 1 gated por requires_checkpoints)
+- [x] README v2 alineado a la rubrica (35+35+15+15)
+- [x] Runbook DEPLOYMENT.md + script reproducible deploy_hetzner.sh
+- [ ] **Ejecutar deploy real en Hetzner** (a cargo de Elvis: `bash scripts/deploy_hetzner.sh`)
+- [ ] **Smoke test desde 3 dispositivos** (depende del deploy real)
+- [ ] Completar `docs/DEPLOYMENT.md` seccion 8 con datos reales (IP, latencia, tier)
+- [ ] Tag `v1.0-deploy` despues del smoke test exitoso
 
-Briefing detallado: [`docs/CICLO_4_DESPLIEGUE_BRIEF.md`](docs/CICLO_4_DESPLIEGUE_BRIEF.md)
+Artefacto: [`docs/CICLO_4_ARTEFACTOS.md`](docs/CICLO_4_ARTEFACTOS.md)
+Briefing original: [`docs/CICLO_4_DESPLIEGUE_BRIEF.md`](docs/CICLO_4_DESPLIEGUE_BRIEF.md)
 Prompt para retomar: [`docs/PROMPT_PROXIMO_CHAT.md`](docs/PROMPT_PROXIMO_CHAT.md)
+
+### Ciclo 5 (proximo) — Refinamiento + entrega final
+- [ ] Quantizacion INT8 para edge (tablet)
+- [ ] Refinamiento modelo (augmentation, ensemble, pre-training RadImageNet)
+- [ ] Mejorar MAE de Cobb (actual binario: 23 grados)
+- [ ] CI con GitHub Actions (opcional)
+- [ ] Articulo IEEE/ACM (si los resultados lo soportan)
+- [ ] Slides de sustentacion + demo en vivo
 
 ### Metricas (se actualiza al completar entrenamientos)
 ### TABLA FINAL — 5 MODELOS MULTICLASE ENTRENADOS
@@ -315,3 +331,13 @@ Orden corto:
 | 2026-04-20 | Crear WORKFLOW.md (policy del repo) | Reglas no negociables visibles para humanos y agentes. Pilar 5 (rule-driven). |
 | 2026-04-20 | Crear docs/ con artefactos por ciclo | Cada ciclo cierra con CICLO_N_ARTEFACTOS.md (input del siguiente). Pilar 6. |
 | 2026-04-20 | Crear docs/PROMPT_PROXIMO_CHAT.md | Onboarding instantaneo del proximo chat con Claude. Aplica externalizar contexto. |
+| 2026-05-17 | Migrar pesos de OneDrive a Hugging Face Hub | Estandar industria ML, gratis, versionado tipo git, soporta archivos grandes, intercambio sin re-deploy (cambias el .pth en HF y reinicias el container). |
+| 2026-05-17 | Servir solo DeepLabV3+ en produccion (no los 5 modelos) | Ganador del Ciclo 3 con margen. Ahorra ~700 MB de RAM y 30-60s de arranque sin perder valor para el usuario final. Los otros 4 viven en HF + notebook para analisis comparativo. |
+| 2026-05-17 | Convencion `app/main.py` como shim, no renombrar paquete | Cumple letra de la rubrica ("carpeta app/ o src/") sin churn en notebooks, scripts e imports del equipo. |
+| 2026-05-17 | Caddy en vez de Nginx para reverse proxy + SSL | Let's Encrypt automatico en 1 linea de config vs cert-bot + cron + dhparams. Para un deploy academico, la complejidad del nginx es un impuesto sin upside. |
+| 2026-05-17 | Dominio gratis con nip.io en vez de comprar uno | El equipo no tiene dominio asignado; nip.io da hostname resoluble + Let's Encrypt lo firma. Cambiar a dominio propio es 1 env var despues. |
+| 2026-05-17 | .dockerignore agresivo (sin docs, notebooks, dataset, mlruns) | Reduce build context de ~5 GB a < 100 MB. Build mas rapido, menos data al daemon. |
+| 2026-05-17 | Tests con pytest desde Ciclo 4 (no antes) | Hasta el Ciclo 3 la prioridad fue entrenar modelos. Con deploy llega el momento de pinear contratos (config, weights, app boot, disclaimer). |
+| 2026-05-17 | Usuario no-root (uid 1000) en el container | Buena practica de seguridad estandar. Tiene su home y permisos chown sobre /data/checkpoints. |
+| 2026-05-17 | Crear CLAUDE.md en raiz como pointer a AGENTS.md | AGENTS.md es la fuente publica auditable (estandar agents-md.io). CLAUDE.md existe solo para que Claude Code lo cargue automaticamente. Una sola fuente de verdad. |
+| 2026-05-17 | Reorganizar raiz en carpetas tematicas (requisitos_universidad/, docs/metodologia/, archive/) | PDFs sueltos en raiz era ruido. Las nuevas carpetas tienen README explicativo y politicas claras. Los PDFs de la rubrica oficial SI se commitean (excepcion en .gitignore) por ser el contrato academico. |

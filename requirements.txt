@@ -14,3 +14,8 @@ mlflow>=2.10.0
 gradio>=4.15.0
 Pillow>=10.2.0
 tqdm>=4.66.0
+huggingface_hub>=0.20.0
+grad-cam>=1.5.0
+
+# Testing (dev-only; safe to install alongside runtime)
+pytest>=7.4.0
