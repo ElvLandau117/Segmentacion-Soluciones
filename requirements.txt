@@ -11,13 +11,13 @@ scipy>=1.12.0
 matplotlib>=3.8.0
 seaborn>=0.13.0
 mlflow>=2.10.0
-# gradio + gradio-client are installed by HF Spaces from sdk_version in README YAML.
-# Pinning them here causes pip resolution conflicts; let HF own these.
-# (Local dev: pip will install latest gradio 5.x — works the same.)
-gradio>=5.0.0,<6.0.0
+# HF Spaces uses sdk_version from README YAML; this floor mirrors it so local
+# dev gets the same gradio-client schema fix (gradio 5.30+ resolves the
+# TypeError 'bool not iterable' in gradio_client/utils.py:get_type).
+gradio>=5.50.0,<6.0.0
 Pillow>=10.2.0
 tqdm>=4.66.0
-huggingface_hub>=0.20.0,<0.28.0  # upper bound: gradio 4.44 imports HfFolder, removed in 0.30+
+huggingface_hub>=0.33.5,<2.0  # gradio 5.50 requires >=0.33.5; the old <0.28 pin was for gradio 4.44's HfFolder
 grad-cam>=1.5.0
 
 # Testing (dev-only; safe to install alongside runtime)
