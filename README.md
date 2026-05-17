@@ -333,6 +333,16 @@ el notebook `02_training_experiments.ipynb` para análisis comparativo.
 
 **Detalle completo:** [`docs/CICLO_3_ARTEFACTOS.md`](docs/CICLO_3_ARTEFACTOS.md).
 
+> La visualización del ángulo de Cobb en la app (cajas verdes en las vértebras
+> de inicio/fin, perpendiculares al endplate, arco del ángulo, mini "Cobb-meter"
+> para ángulos pequeños) está inspirada en Fig 1 de **Shi et al. 2025**,
+> "Accurate Cobb Angle Estimation via SVD-Based Curve Detection and Vertebral
+> Wedging Quantification" (IEEE Journal of Biomedical and Health Informatics,
+> [arXiv:2509.24898](https://arxiv.org/abs/2509.24898)). El paper usa landmarks
+> anotados por endplate; nuestro pipeline usa la segmentación multiclase como
+> sustituto, así que el modelo subyacente no es el mismo — solo la presentación
+> visual y el principio de fusionar dos mediciones para la decisión clínica.
+
 ---
 
 ## 10. Estructura del repositorio

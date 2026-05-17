@@ -1,9 +1,11 @@
 # Ciclo 5 — UX clinica del Cobb · Artefacto de Salida
 
-> **Fecha de cierre:** 2026-05-17 noche
+> **Fecha de cierre:** 2026-05-17 noche (Ciclo 5) + 5.1 polish la misma noche
 > **Estado:** ✅ COMPLETO
 > **URL pública:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 > **Próximo ciclo (tentativo):** Ciclo 6 — Refinamiento del modelo, entrega académica final, sustentación.
+>
+> **Addendum 5.1** (mismo día): polish de la visualización del Cobb. Ver sección 11.
 
 ---
 
@@ -174,3 +176,80 @@ binary=15.1°). Resuelve el false-negative que Elvis observó.
 - `archive/2509.24898v1.pdf` — Shi et al. 2025 (HKU + Renji, IEEE J-BHI).
 - [`../AGENTS.md`](../AGENTS.md) — memoria persistente del proyecto.
 - [`../WORKFLOW.md`](../WORKFLOW.md) — reglas del repositorio.
+
+---
+
+## 11. Addendum 5.1 — Polish de la visualización del Cobb
+
+> **Fecha:** 2026-05-17 noche (misma sesión, posterior al cierre original).
+> **Motivación:** Elvis subió 2 screenshots de la pestaña Cobb Angle y
+> reportó "solo veo dos líneas separadas... visualmente yo veo la desviación
+> pero la imagen no la comunica". Diagnóstico: la viz dibujaba líneas A LO
+> LARGO del endplate en lugar de PERPENDICULARES, y no tenía arco ni punto
+> de intersección.
+
+### Cambios
+
+| # | Mejora | Implementación |
+|---|--------|----------------|
+| A | Perpendiculares correctas al endplate | `_endplate_vectors` retorna `(tangent, perpendicular)`. La función principal usa el `perpendicular` para las líneas largas y el `tangent` para los marcadores cortos. |
+| B | Punto de intersección + arco del ángulo | `_line_intersection` + `_draw_angle_arc` con `cv2.ellipse`. Solo dibuja el arco si la intersección cae dentro del frame Y el ángulo es > 1°. |
+| C | Marcadores cyan sobre los endplates | `_draw_endplate_marker`, ancho 70% del bbox de la vértebra. Análogo a las "ticks" que en Fig 1 del paper marcan el endplate. |
+| D | Mini "Cobb-meter" en esquina | `_draw_speedometer` con escala 4x en la aguja para que ángulos pequeños se vean. Triggers: ángulo < 8° o intersección fuera de frame. |
+| E | Overlay del binary: spline + inflection points | `_draw_binary_overlay` consume `cobb_binary["spline_x"]`, `cobb_binary["spline_y"]`, `cobb_binary["inflection_points"]` — datos que ya devolvía `cobb_from_binary` y que la viz del Ciclo 5 no usaba. |
+
+Modularización: 6 helpers privados al mismo nivel que la función pública,
+todos testeables aislados.
+
+### Bug encontrado durante el smoke remoto
+
+El primer smoke remoto reportó "0 red pixels" en la imagen final. Causa:
+las llamadas `cv2.line(..., (0, 0, 255), ...)` asumían convención BGR de
+OpenCV, pero el array `vis` viene de Gradio como **RGB**. OpenCV no
+transforma color spaces — solo escribe los 3 valores en orden. Resultado:
+las "líneas rojas" eran AZULES en la imagen final, los "círculos amarillos"
+eran CYAN, etc.
+
+Fix: cambiar todas las llamadas que esperaban rojo a `(255, 0, 0)`, e
+inflection points a `(255, 255, 0)` (amarillo en RGB, distinto del cyan
+de los endplate markers). Documentado como decisión en AGENTS.md sec 9.
+
+### Smoke remoto post-fix
+
+| Color | N_1 | S_21 | Significado |
+|---|:-:|:-:|---|
+| Red (BGR check) | 1295 | 929 | perpendiculares + arco + speedometer needle |
+| Green | 890 | 579 | end-vertebra fills + boxes |
+| Cyan | 2900 | 2975 | endplate markers + header multiclass |
+| Yellow | 2567 | 2609 | inflection points + header binary |
+
+Todos los colores presentes con conteos coherentes.
+
+### Tests añadidos (Ciclo 5.1)
+
+- `test_line_intersection_handles_parallel_and_crossing` — pin del contrato
+  parallel→None + cross math.
+- `test_endplate_vectors_are_perpendicular_unit_vectors` — verifica que
+  orientation=π/2 da tan=(1,0) y perp=(0,-1) y son ortogonales.
+- `test_speedometer_draws_inside_the_image` — el gauge realmente pinta
+  píxeles en la mitad inferior.
+- `test_binary_overlay_renders_spline_and_inflection_points` — spline +
+  círculos amarillos + skip-paths para None y failed.
+- Actualizado `test_draw_cobb_angle_visualization_modifies_image` para la
+  nueva signature (`cobb_binary_result` dict en vez de `cobb_binary_deg` float).
+
+Suite final: **21 passed + 1 skipped** (era 17 + 1 antes del polish).
+
+### Commits del Ciclo 5.1
+
+- `85186d9` fix(eval): replace cobb viz with perpendiculars + arc + endplate markers + binary overlay
+- `4b612a1` test: cover new cobb visualization helpers
+- `0b97bad` fix(viz): use RGB color tuples (not BGR) — the image array is RGB
+- `<este>` docs(cycle5): polish cobb visualization + credit to Shi et al. 2025
+
+### Crédito al paper
+
+La visualización del Cobb angle está inspirada en Fig 1 de Shi et al. 2025
+("Accurate Cobb Angle Estimation via SVD-Based Curve Detection and
+Vertebral Wedging Quantification", IEEE J-BHI, arXiv:2509.24898).
+Documentado en el docstring de `draw_cobb_angle_visualization` + README sec 9.

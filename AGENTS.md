@@ -6,11 +6,13 @@
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
-> **✅ Estado real:** App funcionando end-to-end con UX clinica mejorada (Ciclo 5):
-> visualizacion del Cobb con cajas + lineas tangentes (tipo Shi et al. 2025), UI dual-Cobb
-> con indicador de concordancia, Assessment basado en Cobb binary (mas robusto que multiclass).
-> Smoke remoto verde: caso S_21 (escoliosis) ahora se detecta como "Mild" correctamente
-> (antes salia "Normal" por usar el multiclass ruidoso).
+> **✅ Estado real:** App funcionando end-to-end con UX clinica mejorada (Ciclo 5 + 5.1):
+> visualizacion del Cobb con cajas verdes en end vertebrae + perpendiculares rojas al endplate
+> + arco del angulo + speedometer fallback + overlay del binary (spline + inflection points).
+> UI dual-Cobb con indicador de concordancia, Assessment basado en Cobb binary (mas robusto
+> que multiclass). Smoke remoto verde con todos los colores correctos (rojo/verde/cyan/amarillo).
+> El caso S_21 ahora se detecta como "Mild" correctamente (antes salia "Normal" por usar el
+> multiclass ruidoso).
 
 > **Si eres nuevo en el proyecto:** sigue la [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
 > antes de hacer cualquier cambio.
@@ -183,13 +185,16 @@ Sin replicar su modelo (no tenemos landmarks anotados), solo extrapolando
 ideas de visualizacion + fusion de mediciones.
 
 - [x] Assessment basado en Cobb binary (mas robusto; MAE 23° vs multi 26-45°)
-- [x] Visualizacion Cobb tipo Fig 1 del paper: cajas verdes en upper/lower
-      end vertebrae + lineas tangentes rojas a los endplates + header
-      con angulos. En `evaluation/visualize.py:draw_cobb_angle_visualization`.
+- [x] **Visualizacion Cobb tipo Fig 1 del paper (Ciclo 5.1 polish)**:
+      perpendiculares correctas al endplate (no a lo largo) + punto de
+      interseccion + arco del angulo + marcadores cyan sobre el endplate +
+      mini "Cobb-meter" en esquina para angulos pequeños + overlay del binary
+      (spline blanco + inflection points amarillos). Modularizada en helpers
+      en `evaluation/visualize.py`.
 - [x] UI dual-Cobb: ambos metodos en paralelo + indicador de CONCORDANCIA
       (<=5° alta / <=15° revisar / >15° discrepancia)
 - [x] Refactor: `build_results_text` extraido como helper testeable (puro)
-- [x] 4 tests nuevos (suite: 17 passed + 1 skipped)
+- [x] 8 tests nuevos en total (suite: 21 passed + 1 skipped)
 - [x] Deploy via `scripts/upload_to_space.py` (3 archivos, rebuild ~90s)
 - [x] Smoke test remoto verde — el caso S_21 que antes daba "Normal"
       (multiclass=0.4°) ahora reporta "Mild scoliosis" correctamente
@@ -388,3 +393,5 @@ Orden corto:
 | 2026-05-17 noche | Visualizacion Cobb tipo Fig 1 del paper Shi et al. 2025 | Cajas verdes en upper/lower end vertebrae + lineas tangentes rojas a los endplates + header numerico. Mejora dramatica de UX clinica sin reanotar el dataset. Implementado en `evaluation/visualize.py:draw_cobb_angle_visualization`. |
 | 2026-05-17 noche | UI dual-Cobb con indicador de concordancia | Muestra binary y multiclass en paralelo + bloque CONCORDANCIA (<=5° alta / <=15° revisar / >15° discrepancia). Da al medico contexto para decidir, en vez de un solo numero. Pure helper `build_results_text` extraido a module-level para tests. |
 | 2026-05-17 noche | NO replicar paper Shi et al. 2025 completo | Su modelo HRNet+Swin+dual-task requiere landmarks anotados de upper/lower endplate por vertebra. Nuestro MaIA tiene mascaras de segmentacion (no landmarks). Reanotar es trabajo clinico de semanas, no viable en este semestre. Si extrapolamos sus ideas A (visualizacion) y B (fusion de mediciones) — Ciclo 5. VWI y SVD sobre matriz de angulos quedan fuera (requieren los mismos landmarks). |
+| 2026-05-17 noche (Ciclo 5.1) | Cobb viz: perpendiculares al endplate (no a lo largo) + arco + speedometer + overlay del binary | La viz del Ciclo 5 dibujaba lineas A LO LARGO del endplate. Convencion clinica + Fig 1 del paper usa perpendiculares (las que cruzan formando el angulo visible). Para angulos pequeños (<8°) las perpendiculares quedan casi paralelas y la interseccion sale fuera del frame: usar mini "Cobb-meter" en esquina como fallback con la aguja escalada 4x para que se mueva visiblemente. Se aprovechan los datos del binary (`spline_x/y` + `inflection_points`) que ya devolvia `cobb_from_binary` y que la viz no usaba. |
+| 2026-05-17 noche (Ciclo 5.1) | Convencion de color RGB (no BGR) en visualizaciones que pasan por Gradio | La imagen llega a `draw_cobb_angle_visualization` como RGB (Gradio convencion). cv2 no transforma color spaces — solo escribe los 3 valores en orden. Pasar `(0, 0, 255)` (rojo BGR canonical) en un array RGB pinta AZUL puro. Todas las llamadas cv2 que esperan rojo usan ahora `(255, 0, 0)`; similar para amarillo `(255, 255, 0)`. Detectado por smoke remoto que encontro 0 red pixels. |

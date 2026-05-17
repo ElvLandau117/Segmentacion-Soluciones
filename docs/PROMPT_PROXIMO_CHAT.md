@@ -1,9 +1,13 @@
-# Prompt para el próximo chat — Ciclo 5 cerrado, pendiente brief de Ciclo 6
+# Prompt para el próximo chat — Ciclo 5 + 5.1 cerrados, pendiente brief de Ciclo 6
 
-> **Estado al 2026-05-17 noche:** Ciclo 5 ✅ COMPLETO. UX clínica del Cobb
-> mejorada (Assessment via binary, visualización tipo paper Shi et al. 2025,
-> UI dual-Cobb con concordancia). Smoke remoto verde: caso S_21 (escoliosis)
-> ahora se detecta correctamente como "Mild" (antes salía "Normal").
+> **Estado al 2026-05-17 noche:** Ciclo 5 + 5.1 ✅ COMPLETOS.
+> - Assessment via binary (más robusto).
+> - Visualización Cobb tipo Fig 1 de Shi et al. 2025: cajas verdes en end vertebrae
+>   + perpendiculares rojas al endplate + arco del ángulo + speedometer para casos
+>   leves + overlay del binary (spline + inflection points).
+> - UI dual-Cobb con CONCORDANCIA.
+> - Smoke remoto verde con colores correctos (rojo/verde/cyan/amarillo).
+> - Caso S_21 (escoliosis leve) ahora se detecta como "Mild" correctamente.
 >
 > **No hay handoff técnico pendiente.** El próximo chat debe definir el scope
 > del Ciclo 6 (refinamiento de modelo y/o entrega académica final) y escribir
@@ -33,11 +37,13 @@ U. Andes, Coursera).
 - Pesos en HF Hub: `ElvLandau/spine-checkpoints`.
 - 4 tabs operativos (Binary, Vertebrae, Cobb, Explainability) con disclaimer.
 - Gradio 5.50.0 + huggingface_hub>=0.33.5 + Python 3.11.
-- 17 tests pasando (1 gated por checkpoints locales).
+- 21 tests pasando (1 gated por checkpoints locales).
 - Mecanismo reproducible de updates: `scripts/upload_to_space.py`.
-- **UX clínica Cobb (Ciclo 5):** Assessment basado en binary (más robusto),
-  visualización con cajas + líneas tangentes (tipo Shi et al. 2025), UI con
-  ambos métodos + indicador de concordancia.
+- **UX clínica Cobb (Ciclo 5 + 5.1):** Assessment basado en binary (más robusto),
+  visualización tipo Fig 1 de Shi et al. 2025 con perpendiculares + arco +
+  cajas + endplate markers + speedometer + binary overlay (spline + inflection
+  points), UI con ambos métodos + indicador de concordancia, convención RGB
+  consistente.
 
 ### Lo que sigue (Ciclo 6)
 
