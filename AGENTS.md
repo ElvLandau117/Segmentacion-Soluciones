@@ -2,9 +2,11 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-17 PM | Ciclos completados: 1, 2, 3, 4 (✅ APP DESPLEGADA EN HF SPACES) | Proximo ciclo: 5 (Refinamiento + entrega academica)
+> Ultima actualizacion: 2026-05-17 noche | Ciclos: 1, 2, 3 completos. Ciclo 4: ✅ APP DESPLEGADA Y CORRIENDO, ⚠️ pendiente fix de `gradio-client TypeError` en /api_info | Proximo chat: ver [`docs/PROMPT_PROXIMO_CHAT.md`](docs/PROMPT_PROXIMO_CHAT.md)
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
+>
+> **⚠️ Estado real:** UI carga + 4 tabs visibles + pesos cargados, pero el boton "Analyze" no completa la llamada al backend por bug en gradio-client. Ver PROMPT_PROXIMO_CHAT.md para retomar.
 
 > **Si eres nuevo en el proyecto:** sigue la [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
 > antes de hacer cualquier cambio.
