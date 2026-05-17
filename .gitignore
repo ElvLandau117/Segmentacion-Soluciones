@@ -1,53 +1,79 @@
-# Python
+# =============================================================================
+# .gitignore — Spine Segmentation
+# =============================================================================
+
+# --- Python ---
 __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
 build/
 .eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Entorno
+# --- Entornos virtuales ---
 .venv/
 venv/
-*.env
+.env
+.env.local
+# El template .env.example SI va al repo (documenta los env vars disponibles)
 
-# Dataset (muy pesado para git, se comparte por separado)
+# --- Dataset (pesado, propiedad U. Andes, se distribuye por separado) ---
 MaIA_Scoliosis_Dataset/
 
-# Pesos de modelos (pesados, se comparten por separado via OneDrive)
-checkpoints/*.pth
+# --- Pesos de modelos (distribuidos via Hugging Face Hub - ver README) ---
+checkpoints/
 checkpoints_inference/
 paquete_equipo/
-paquete_equipo_onedrive.zip
 
-# Agentes y configuracion IDE
+# --- Herramientas y configuracion local ---
 .claude/
-
-# MLflow runs (se regeneran)
-mlruns/
-
-# Outputs generados (se regeneran)
-outputs/
-
-# IDE
 .vscode/
 .idea/
 *.swp
 
-# OS
+# --- MLflow runs (se regeneran al entrenar) ---
+mlruns/
+
+# --- Outputs generados (se regeneran al evaluar) ---
+outputs/
+
+# --- OS metadata ---
 Thumbs.db
 .DS_Store
 
-# Jupyter
+# --- Jupyter ---
 .ipynb_checkpoints/
 
-# Notebook anterior (referencia, no parte del proyecto)
-Laboratorio_sumativo_escoliosis_.ipynb
+# --- Notebook anterior del semestre anterior (referencia, no parte del proyecto) ---
+notebooks/Laboratorio_sumativo_escoliosis_.ipynb
 spine_model.keras
 resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5
 
-# PDF de referencia
+# --- PDFs ---
+# Por defecto los PDFs no se commitean (derechos de autor de libros y papers)
 *.pdf
+# EXCEPCION: los PDFs oficiales de la universidad SI van al repo
+# (rubrica de evaluacion, parte del contrato academico)
+!requisitos_universidad/*.pdf
 
-# Transcripciones de referencia (no son parte del proyecto)
-orchestantion agentic.txt
+# --- Transcripcion del curso de metodologia (derechos de autor) ---
+docs/metodologia/orchestration_agentic_transcript.txt
+
+# --- Archive (artefactos legacy, no se versionan) ---
+# Toda la carpeta archive/ se ignora EXCEPTO su README explicativo
+archive/*
+!archive/README.md
+
+# --- Hugging Face cache local ---
+.cache/
+.huggingface/
+
+# --- Logs ---
+*.log
+
+# --- Documento final de entrega (se genera, no se versiona el binario) ---
+Entrega_Final_Ciclo_4.pdf
+Entrega_Final_Ciclo_4.docx

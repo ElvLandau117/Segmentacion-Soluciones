@@ -1,0 +1,75 @@
+# =============================================================================
+# .dockerignore — minimiza el build context enviado al daemon de Docker
+#
+# Solo el código y artefactos necesarios para construir la imagen entran al
+# contexto. Los pesos se descargan de Hugging Face Hub en runtime.
+# =============================================================================
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docker
+.dockerignore
+docker-compose.yml
+Caddyfile
+
+# Datasets (los pesos viven en HF Hub; el dataset es propiedad de U. Andes)
+MaIA_Scoliosis_Dataset/
+
+# Pesos de modelos (se descargan al boot del container desde HF Hub)
+checkpoints/
+checkpoints_inference/
+paquete_equipo/
+
+# Experimentos y outputs locales
+mlruns/
+outputs/
+
+# Documentación y assets (no se necesitan en runtime de la app)
+docs/
+notebooks/
+requisitos_universidad/
+README.md
+WORKFLOW.md
+AGENTS.md
+CLAUDE.md
+
+# Archive
+archive/
+
+# Tests (no incluir en imagen de producción)
+tests/
+pytest.ini
+
+# IDE / harness
+.claude/
+.vscode/
+.idea/
+*.swp
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.cache/
+.mypy_cache/
+.ruff_cache/
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Variables de entorno (se inyectan via docker-compose / .env del server)
+.env
+.env.local
+.env.example
+
+# Logs
+*.log
