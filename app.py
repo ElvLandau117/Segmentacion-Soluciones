@@ -18,6 +18,7 @@ use `python -m app.main` instead — that path honors APP_HOST / APP_PORT.
 See docs/HF_SPACES_SETUP.md for the deployment runbook.
 """
 
+from spine_segmentation.config import DEFAULT_BINARY_MODEL, DEFAULT_MULTICLASS_MODEL
 from spine_segmentation.deployment.app import create_app
 from spine_segmentation.deployment.weights import ensure_weights
 
@@ -26,9 +27,13 @@ from spine_segmentation.deployment.weights import ensure_weights
 _paths = ensure_weights()
 
 # Top-level `demo` — HF Spaces discovers Gradio apps by this convention.
+# Model names passed explicitly so the architecture matches the .pth files
+# (binary = unet_resnet50, multiclass = deeplabv3plus_resnet50 — Ciclo 3 winner).
 demo = create_app(
     binary_checkpoint=str(_paths["binary"]) if _paths["binary"] else None,
     multiclass_checkpoint=str(_paths["multiclass"]) if _paths["multiclass"] else None,
+    binary_model_name=DEFAULT_BINARY_MODEL,
+    multiclass_model_name=DEFAULT_MULTICLASS_MODEL,
 )
 
 

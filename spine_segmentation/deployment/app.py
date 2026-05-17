@@ -24,8 +24,8 @@ from spine_segmentation.evaluation.explainability import generate_confidence_map
 def create_app(
     binary_checkpoint: str = None,
     multiclass_checkpoint: str = None,
-    binary_model_name: str = "unet_resnet50",
-    multiclass_model_name: str = "unet_resnet50",
+    binary_model_name: str = None,
+    multiclass_model_name: str = None,
 ) -> gr.Blocks:
     """
     Create the Gradio application.
@@ -33,12 +33,19 @@ def create_app(
     Args:
         binary_checkpoint: Path to binary model checkpoint
         multiclass_checkpoint: Path to multiclass model checkpoint
-        binary_model_name: Name of the binary model architecture
-        multiclass_model_name: Name of the multiclass model architecture
+        binary_model_name: Name of the binary architecture (defaults to DEFAULT_BINARY_MODEL)
+        multiclass_model_name: Name of the multiclass architecture (defaults to DEFAULT_MULTICLASS_MODEL)
 
     Returns:
         Gradio Blocks application
     """
+    # Sentinel-resolve: callers can leave the names as None and we use the
+    # env-driven defaults from config. Hardcoding "unet_resnet50" here was a
+    # latent bug — the deploy serves DeepLabV3+ multiclass, which has a
+    # different decoder, so the checkpoint failed to load.
+    binary_model_name = binary_model_name or DEFAULT_BINARY_MODEL
+    multiclass_model_name = multiclass_model_name or DEFAULT_MULTICLASS_MODEL
+
     # Initialize pipeline
     pipeline = None
     if binary_checkpoint or multiclass_checkpoint:
