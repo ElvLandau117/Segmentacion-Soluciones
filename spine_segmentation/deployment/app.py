@@ -78,39 +78,58 @@ def create_app(
         multiclass_overlay = results.get("multiclass_overlay")
         cobb_vis = results.get("cobb_visualization")
 
-        # Build results text
-        text_lines = ["=== RESULTS ===\n"]
-
-        # Binary Cobb angle
+        # Build results text — dual-Cobb layout (binary + multiclass + agreement)
         cobb_binary = results.get("cobb_binary")
-        if cobb_binary and cobb_binary.get("success"):
-            text_lines.append(f"Cobb Angle (Binary Method): {cobb_binary['cobb_angle_deg']:.1f} degrees")
-        elif cobb_binary:
-            text_lines.append(f"Cobb Angle (Binary): Error - {cobb_binary.get('error', 'unknown')}")
-
-        # Multiclass Cobb angle
         cobb_multi = results.get("cobb_multiclass")
-        if cobb_multi and cobb_multi.get("success"):
-            text_lines.append(f"Cobb Angle (Multiclass Method): {cobb_multi['cobb_angle_deg']:.1f} degrees")
-            text_lines.append(f"  Upper end vertebra: {cobb_multi.get('upper_end_vertebra', 'N/A')}")
-            text_lines.append(f"  Lower end vertebra: {cobb_multi.get('lower_end_vertebra', 'N/A')}")
+        binary_ok = bool(cobb_binary and cobb_binary.get("success"))
+        multi_ok = bool(cobb_multi and cobb_multi.get("success"))
+
+        text_lines: list[str] = ["=== COBB ANGLE ==="]
+        if binary_ok:
+            text_lines.append(
+                f"Binary method:     {cobb_binary['cobb_angle_deg']:5.1f} deg  (more robust, recommended)"
+            )
+        elif cobb_binary:
+            text_lines.append(
+                f"Binary method:     ERROR - {cobb_binary.get('error', 'unknown')}"
+            )
+
+        if multi_ok:
+            upper = cobb_multi.get("upper_end_vertebra", "N/A")
+            lower = cobb_multi.get("lower_end_vertebra", "N/A")
+            text_lines.append(
+                f"Multiclass method: {cobb_multi['cobb_angle_deg']:5.1f} deg  "
+                f"(anatomical info: Upper={upper}, Lower={lower})"
+            )
         elif cobb_multi:
-            text_lines.append(f"Cobb Angle (Multiclass): Error - {cobb_multi.get('error', 'unknown')}")
+            text_lines.append(
+                f"Multiclass method: ERROR - {cobb_multi.get('error', 'unknown')}"
+            )
 
-        # Vertebrae detected
-        vertebrae = results.get("vertebrae_detected", [])
-        if vertebrae:
-            text_lines.append(f"\nVertebrae detected ({len(vertebrae)}):")
-            text_lines.append(f"  {', '.join(vertebrae)}")
+        # Agreement indicator (only when both methods succeeded)
+        if binary_ok and multi_ok:
+            diff = abs(cobb_binary["cobb_angle_deg"] - cobb_multi["cobb_angle_deg"])
+            if diff <= 5.0:
+                concordance = "High agreement - both methods coincide"
+            elif diff <= 15.0:
+                concordance = "Review recommended - methods differ slightly"
+            else:
+                concordance = "Significant discrepancy - specialist judgment required"
+            text_lines.append(
+                f"\nCONCORDANCE: {concordance}"
+            )
+            text_lines.append(
+                f"    |Binary - Multiclass| = {diff:.1f} deg"
+            )
 
-        # Scoliosis assessment — based on the BINARY Cobb (more robust on our data:
+        # Severity assessment — based on the BINARY Cobb (more robust on our data:
         # MAE 23 deg + Pearson 0.66, vs multiclass MAE 26-45 deg with negative correlation
         # in the worst case). The multiclass value above is kept as anatomical reference
         # (which vertebrae make up the curve), not as the severity criterion.
         assessment_source = None
-        if cobb_binary and cobb_binary.get("success"):
+        if binary_ok:
             assessment_source = ("Binary", cobb_binary["cobb_angle_deg"])
-        elif cobb_multi and cobb_multi.get("success"):
+        elif multi_ok:
             # Fallback only if the binary method failed
             assessment_source = ("Multiclass fallback", cobb_multi["cobb_angle_deg"])
 
@@ -124,7 +143,16 @@ def create_app(
                 assessment = "Moderate scoliosis (25-40 degrees)"
             else:
                 assessment = "Severe scoliosis (> 40 degrees)"
-            text_lines.append(f"\nAssessment ({source_label}): {assessment}")
+            text_lines.append(
+                f"\n=== ASSESSMENT (based on {source_label}) ==="
+            )
+            text_lines.append(assessment)
+
+        # Vertebrae detected (anatomical reference)
+        vertebrae = results.get("vertebrae_detected", [])
+        if vertebrae:
+            text_lines.append(f"\n=== VERTEBRAE DETECTED ({len(vertebrae)}) ===")
+            text_lines.append(", ".join(vertebrae))
 
         results_text = "\n".join(text_lines)
 
