@@ -205,10 +205,12 @@ class SpineSegmentationPipeline:
                 )
             return vis
 
+        # Pass the full binary dict so the visualization can overlay the
+        # spline + inflection points (Ciclo 5.1), not just the angle number.
         return draw_cobb_angle_visualization(
             image=image,
             multiclass_mask=multiclass_mask,
             cobb_multiclass_result=cobb_multi,
-            cobb_binary_deg=cobb_binary_deg,
+            cobb_binary_result=cobb_binary,
             scheme=self.scheme,
         )
