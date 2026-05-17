@@ -8,6 +8,26 @@ Sistema de deep learning para la segmentación automática de la columna vertebr
 
 ---
 
+## 🚀 Ruta sugerida de lectura
+
+**¿Eres nuevo en el proyecto?** Sigue esta ruta de onboarding (~85 min total):
+
+| # | Archivo | Para qué |
+|---|---------|----------|
+| 01 | [`README.md`](README.md) | Visión general, instalación, uso |
+| 02 | [`AGENTS.md`](AGENTS.md) | Decisiones, problemas conocidos, métricas |
+| 03 | [`WORKFLOW.md`](WORKFLOW.md) | Reglas del repositorio, convenciones |
+| 04 | [`docs/CICLO_3_ARTEFACTOS.md`](docs/CICLO_3_ARTEFACTOS.md) | Estado actual del proyecto |
+| 05 | [`docs/CICLO_4_DESPLIEGUE_BRIEF.md`](docs/CICLO_4_DESPLIEGUE_BRIEF.md) | Próximo ciclo (despliegue) |
+| 06 | [`notebooks/03_informe_final.ipynb`](notebooks/03_informe_final.ipynb) | Notebook ejecutable (CPU) |
+
+Detalles: [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
+
+**¿Vas a continuar el trabajo en un nuevo chat con Claude?**
+→ Usa el prompt listo en [`docs/PROMPT_PROXIMO_CHAT.md`](docs/PROMPT_PROXIMO_CHAT.md)
+
+---
+
 ## Tabla de Contenido
 
 1. [Descripción del Proyecto](#descripción-del-proyecto)

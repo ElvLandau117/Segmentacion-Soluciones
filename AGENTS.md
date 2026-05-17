@@ -2,7 +2,10 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-04-13 | Ciclo: 2
+> Ultima actualizacion: 2026-04-20 | Ciclos completados: 1, 2, 3 | Proximo ciclo: 4 (Despliegue)
+
+> **Si eres nuevo en el proyecto:** sigue la [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
+> antes de hacer cualquier cambio.
 
 ---
 
@@ -116,28 +119,45 @@ Algunos ground truth = ~90 grados exactos (limite matematico del arctan). Docume
 
 ## 5. Estado Actual
 
-### Ciclo 1 (completado)
-- [x] Infraestructura completa: paquete Python modular
+### Ciclo 1 (completado) — Infraestructura
+- [x] Paquete Python modular (`spine_segmentation/`)
 - [x] Pipeline de datos: augmentation, splits, 3 esquemas de clases
 - [x] 5 modelos configurados en config.py
 - [x] Trainer con MLflow + AMP + early stopping
 - [x] Evaluacion: Dice, IoU, per-class, visualizaciones
 - [x] Cobb angle: 2 metodos (binario + multiclase)
 - [x] Explicabilidad: Grad-CAM + confianza + panel clinico
-- [x] Deploy: Gradio app con explicabilidad + Dockerfile
+- [x] Deploy local: Gradio app + Dockerfile
 - [x] Notebook maestro para equipo (carga pesos, corre en CPU)
 
-### Ciclo 2 (en progreso) — ENFOQUE: multiclase 24 vertebras
-- [x] AGENTS.md creado
-- [x] Git inicializado con .gitignore
-- [ ] Modelo 1: unet_mit_b3 multiclase -> ENTRENANDO
-- [ ] Modelo 2: manet_mit_b5 multiclase -> pendiente
-- [ ] Modelo 3: unet_resnet50 multiclase -> pendiente
-- [ ] Modelo 4: unet_efficientnet_b4 multiclase -> pendiente
-- [ ] Modelo 5: deeplabv3plus_resnet50 multiclase -> pendiente
-- [ ] Evaluacion comparativa final
-- [ ] Calculo de Cobb con ground truth
-- [ ] Paneles de explicabilidad
+### Ciclo 2 (completado) — Entrenamiento Transformers + Git
+- [x] Git inicializado con .gitignore correcto
+- [x] AGENTS.md creado (memoria persistente del proyecto)
+- [x] U-Net + MiT-B3 multiclase entrenado (Dice=0.3157)
+- [x] MAnet + MiT-B5 multiclase entrenado (Dice=0.3271)
+- [x] Hallazgo: transformers no superan CNN multi-escala
+
+### Ciclo 3 (completado) — 5 Modelos + Paquete Equipo
+- [x] DeepLabV3+ multiclase entrenado (Dice=0.3378 — MEJOR)
+- [x] U-Net + ResNet50 multiclase entrenado (Dice=0.2691)
+- [x] U-Net + EfficientNet-B4 multiclase entrenado (Dice=0.2189)
+- [x] Evaluacion comparativa de los 5 modelos
+- [x] Pesos exportados inference-only (838 MB, 66% reduccion)
+- [x] Paquete OneDrive listo (`paquete_equipo_onedrive.zip`, 776 MB)
+- [x] Notebook `03_informe_final.ipynb` estilo semestre anterior
+- [x] Artefacto formal: [`docs/CICLO_3_ARTEFACTOS.md`](docs/CICLO_3_ARTEFACTOS.md)
+
+### Ciclo 4 (proximo) — Despliegue
+- [ ] Validar Dockerfile actual
+- [ ] Optimizar tamano de imagen
+- [ ] Preparar deploy en Hetzner
+- [ ] Desplegar app web publicamente
+- [ ] Configurar Nginx + SSL (opcional)
+- [ ] Smoke test end-to-end
+- [ ] Documentar deployment
+
+Briefing detallado: [`docs/CICLO_4_DESPLIEGUE_BRIEF.md`](docs/CICLO_4_DESPLIEGUE_BRIEF.md)
+Prompt para retomar: [`docs/PROMPT_PROXIMO_CHAT.md`](docs/PROMPT_PROXIMO_CHAT.md)
 
 ### Metricas (se actualiza al completar entrenamientos)
 ### TABLA FINAL — 5 MODELOS MULTICLASE ENTRENADOS
@@ -183,25 +203,47 @@ Algunos ground truth = ~90 grados exactos (limite matematico del arctan). Docume
    - C4: 0.11, C3: 0.00 (no detectadas - vertebras muy raras en dataset)
    - Desbalance extremo limita el aprendizaje de clases raras
 
-### CICLO 3 COMPLETADO
+---
 
-- [x] AGENTS.md creado (persistencia spec-driven)
-- [x] Git inicializado con .gitignore
-- [x] Los 5 modelos multiclase entrenados
-- [x] Evaluacion comparativa completada
-- [x] Pesos exportados inference-only (838 MB total, 66% reduccion)
-- [x] Paquete para equipo (OneDrive): paquete_equipo_onedrive.zip (776 MB)
-- [x] Documentacion completa (INSTRUCCIONES_EQUIPO.md, RESULTADOS.md)
-- [x] Notebook final (03_informe_final.ipynb) estilo semestre pasado
-- [x] README.md actualizado con resultados finales
+## 5.bis Metodología: Spec-Driven Work + Work Orchestration
+
+El proyecto sigue la metodología de Leonardo Gonzalez:
+- **Six Pillars of Spec-Driven Work** (2025)
+- **From Spec-Driven Work to Work Orchestration** (2026)
+- Transcripción del curso en `orchestantion agentic.txt`
+
+### Los 6 Pilares aplicados aquí
+1. **Colaboración sobre delegación** — humano + agente trabajan juntos, no solo "ejecuta esto"
+2. **Procesos trazables** — toda decisión registrada en este AGENTS.md con su razón
+3. **Orquestación entre herramientas** — Git + OneDrive + GPU local + Hetzner (futuro)
+4. **Buenas specs** — `docs/CICLO_N_*_BRIEF.md` antes de ejecutar cada ciclo
+5. **Spec + test + rule-driven** — `WORKFLOW.md` define reglas, cada cambio se verifica
+6. **Artefacto final = input del siguiente ciclo** — `docs/CICLO_N_ARTEFACTOS.md`
+
+### Los 5 Principios de Autonomía aplicados aquí
+1. **Externalizar contexto útil** — AGENTS.md, docs/, no en chat
+2. **Descomponer el trabajo** — unidades <8h por commit (ver WORKFLOW.md sec 3)
+3. **Especialización** — diferentes scripts para train/eval/cobb/explainability
+4. **Verificación = generación** — métricas en cada ciclo, no solo "el código corre"
+5. **Legibilidad del repositorio** — `docs/RUTA_LECTURA.md` para nuevos colaboradores
+
+### Estructura de ciclos
+```
+Ciclo N:
+  Input:    docs/CICLO_(N-1)_ARTEFACTOS.md + AGENTS.md
+  Trabajo:  unidades <8h, cada una con commit
+  Output:   docs/CICLO_N_ARTEFACTOS.md + AGENTS.md actualizado
+```
+
+Reglas operativas en [`WORKFLOW.md`](WORKFLOW.md).
 
 ---
 
 ## 6. Configuracion de Entrenamiento
 
 ```python
-# config.py - parametros actuales
-batch_size = 8          # Usa ~8-10 GB de 16 GB VRAM
+# config.py - parametros actuales (Ciclo 3)
+batch_size = 12         # Usa ~12 GB de 16 GB VRAM
 image_size = 512        # Preserva detalle vertebral
 encoder_lr = 1e-5       # Encoder pretrained: LR bajo
 decoder_lr = 1e-4       # Decoder random: LR alto
@@ -234,13 +276,23 @@ TABLET (consultorio) ─ Modelo ligero (EfficientNet-B4, 19MB INT8)
 
 ## 8. Para Nuevo Chat/Agente
 
-1. **Lee AGENTS.md completo** antes de hacer cualquier cosa
-2. El proyecto esta IMPLEMENTADO — no crear archivos desde cero
-3. Revisa `config.py` para modelos y rutas
-4. Revisa `checkpoints/` para modelos ya entrenados
-5. Seccion 5 = donde continuar
-6. Seccion 4 = problemas del dominio (no repetir errores)
-7. **Al terminar tu ciclo: ACTUALIZA este archivo** (estado, metricas, decisiones nuevas)
+**Antes de hacer cualquier cosa, sigue la ruta de lectura formal:**
+→ [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
+
+Orden corto:
+1. Leer este `AGENTS.md` completo
+2. Leer [`WORKFLOW.md`](WORKFLOW.md) (reglas no negociables del repo)
+3. Leer el ultimo `docs/CICLO_N_ARTEFACTOS.md` (estado actual real)
+4. Si vas a continuar trabajo: leer el `docs/CICLO_(N+1)_*_BRIEF.md`
+5. Revisar `config.py` para hiperparametros y rutas
+6. Revisar `checkpoints/` para ver que modelos hay (si no estan, descargar de OneDrive)
+
+**Al cerrar tu ciclo de trabajo:**
+- ACTUALIZA este archivo (estado, metricas, decisiones)
+- CREA `docs/CICLO_N_ARTEFACTOS.md` con los outputs del ciclo
+- CREA `docs/CICLO_(N+1)_*_BRIEF.md` con la spec del siguiente
+- ACTUALIZA `docs/PROMPT_PROXIMO_CHAT.md` para retomar el siguiente chat
+- Commit con mensaje siguiendo `WORKFLOW.md` sec 4
 
 ---
 
@@ -255,3 +307,11 @@ TABLET (consultorio) ─ Modelo ligero (EfficientNet-B4, 19MB INT8)
 | 2026-04-13 | Solo multiclase, NO binario | El binario era del semestre anterior como guia. La solucion real es segmentar vertebras individuales. |
 | 2026-04-13 | Explicabilidad obligatoria | AI medica requiere interpretabilidad. El medico necesita ver POR QUE el modelo decidio (Grad-CAM + confianza). No cajas negras. |
 | 2026-04-13 | Deploy en 2 niveles (servidor + tablet) | Modelo completo en Hetzner via API, modelo ligero INT8 para tablet offline. |
+| 2026-04-13 | batch_size 8 → 12 (Ciclo 3) | Solo se usaban 8 GB de 16 GB de VRAM. bs=12 usa ~12 GB y acelera. |
+| 2026-04-13 | Compartir pesos via OneDrive, no GitHub | Pesos pesados (>100MB) no encajan en versionado de codigo. ZIP de 776 MB para el equipo. |
+| 2026-04-13 | Exportar checkpoints inference-only | Quitar optimizer_state_dict reduce 66% el tamano. Suficiente para inferencia. |
+| 2026-04-13 | Notebook 03_informe_final estilo lab semestre anterior | Familiar para el equipo + funciona en CPU. Cumple objetivo de reproducibilidad. |
+| 2026-04-20 | Adoptar metodologia Spec-Driven + Work Orchestration | Cada ciclo cierra con artefacto en docs/, AGENTS.md como memoria. Patron OpenSymphony. |
+| 2026-04-20 | Crear WORKFLOW.md (policy del repo) | Reglas no negociables visibles para humanos y agentes. Pilar 5 (rule-driven). |
+| 2026-04-20 | Crear docs/ con artefactos por ciclo | Cada ciclo cierra con CICLO_N_ARTEFACTOS.md (input del siguiente). Pilar 6. |
+| 2026-04-20 | Crear docs/PROMPT_PROXIMO_CHAT.md | Onboarding instantaneo del proximo chat con Claude. Aplica externalizar contexto. |
