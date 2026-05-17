@@ -22,11 +22,14 @@ de evaluación de despliegue de la Universidad de los Andes (Coursera).
 | Modelo en producción | **DeepLabV3+ ResNet50** (multiclase, ganador del Ciclo 3) + **UNet ResNet50** (binario para Cobb) |
 | Convención de entrypoint | **`app.py` raíz** (HF Spaces) + **`app/main.py` shim** (Docker/local) |
 | Despliegue alternativo | **Hetzner + Docker Compose + Caddy** (commiteado, documentado, no usado en producción) |
-| Versión Gradio | **5.0.1** (4.x tenía bug `TypeError` en `gradio-client 1.3`) |
+| Versión Gradio | **5.50.0** (bumped desde 5.0.1 para resolver `TypeError` en `gradio_client/utils.py:get_type`) |
+| Versión `huggingface_hub` | **>=0.33.5,<2.0** (bumped desde `<0.28.0`; gradio 5.50 requiere ≥0.33.5) |
 | Versión Python | **3.11** (3.13 quitó `audioop` que `pydub` necesita) |
+| Mecanismo de update del Space | **`scripts/upload_to_space.py`** via `HfApi.upload_file()` — preserva historia LFS limpia (no se usa `git push hf`) |
 
-**11 unidades originales + 8 unidades adicionales de iteración para resolver
-incompatibilidades de la matriz Python/gradio/huggingface_hub. Todo cerrado.**
+**11 unidades originales + 8 unidades adicionales de iteración + 1 unidad final
+de fix del bug `api_info` (Unidad 4.10) para resolver incompatibilidades de la
+matriz Python/gradio/huggingface_hub. Todo cerrado.**
 
 ---
 
@@ -52,10 +55,10 @@ incompatibilidades de la matriz Python/gradio/huggingface_hub. Todo cerrado.**
 | 4.5 | Dockerfile v2 (sin `COPY checkpoints`, no-root, healthcheck con curl) | `627a6b2` | ✅ |
 | 4.6 | Suite pytest (13 tests passing, 1 gated) | `7003252` | ✅ |
 | 4.7 | `docker-compose.yml` + `Caddyfile` (SSL automático) | `6b9e833` | ✅ |
-| 4.8 | `DEPLOYMENT.md` + `deploy_hetzner.sh` (deploy real lo ejecuta Elvis) | `ab3c1c0` | ✅ (runbook listo) / ⏳ (ejecución pendiente) |
+| 4.8 | `DEPLOYMENT.md` + `deploy_hetzner.sh` (deploy real lo ejecuta Elvis) | `ab3c1c0` | ✅ (runbook listo, queda como deploy alternativo) |
 | 4.9 | README v2 rúbrica-compliant | `d184d9c` | ✅ |
-| 4.10 | Smoke test desde 3 dispositivos | (sin commit) | ⏳ Requiere deploy |
-| 4.11 | Cierre: artefactos + AGENTS.md + entrega final + tag | (este commit) | 🔄 En progreso |
+| 4.10 | **Fix bug `api_info` + smoke test end-to-end del Space** (upgrade gradio 5.50, bump hf_hub, script upload_to_space) | (este ciclo) | ✅ Predict via gradio-client devuelve 4 overlays + texto en ~13s |
+| 4.11 | Cierre: artefactos + AGENTS.md + entrega final | (este commit) | ✅ |
 
 ---
 
@@ -65,6 +68,7 @@ incompatibilidades de la matriz Python/gradio/huggingface_hub. Todo cerrado.**
 - `app/__init__.py`, `app/main.py` — entrypoint estándar (shim)
 - `spine_segmentation/deployment/weights.py` — resolución de pesos local/HF
 - `scripts/upload_weights.py` — sube `.pth` a HF Hub
+- `scripts/upload_to_space.py` — sube archivos a un Space via `HfApi.upload_file()` / `create_commit()` sin `git push`
 - `scripts/deploy_hetzner.sh` — bring-up reproducible del stack
 - `scripts/reorganize_root_files.ps1` — limpieza local one-shot
 - `tests/conftest.py` + 4 archivos `test_*.py` — 13 tests, 1 gated
@@ -125,23 +129,28 @@ incompatibilidades de la matriz Python/gradio/huggingface_hub. Todo cerrado.**
 
 ## 7. Limitaciones identificadas (a abordar en Ciclo 5)
 
-1. **Smoke test pendiente** — no se ha probado el deploy en 3+ dispositivos reales.
-2. **Latencia no medida en server real** — el README dice "3-8 s" como rango estimado;
-   el valor real depende del tier de Hetzner que se use.
+1. **Smoke test cross-device pendiente** — el smoke test automatizado via `gradio-client`
+   confirmó el contrato (4 overlays + texto, ~13 s end-to-end). Falta probar en navegadores
+   reales desde 3+ dispositivos físicos (móvil, tablet, desktop).
+2. **Latencia variable según `cpu-basic`** — el primer hit tras sleep tarda ~30-60 s en
+   despertar; siguientes hits ~10-15 s.
 3. **Imagen Docker ~3 GB** — aceptable pero optimizable con `requirements-runtime.txt`
    separado (sin `mlflow`, `seaborn`, `pytest`).
 4. **Dice promedio ~ 0.30** — académicamente válido, insuficiente para uso clínico real.
    No es responsabilidad del Ciclo 4, pero se documenta.
 5. **C3 no detectada** — clase con desbalance extremo. Pendiente refinamiento del modelo.
-6. **Sin GitHub Actions / CI** — los tests pasan local pero no hay enforcement automático.
+6. **Cobb multiclase devuelve 90° degenerado en pacientes normales** — limitación del
+   `arctan` en el método endplate, ya documentada en `AGENTS.md` sec 4.5.
+7. **Sin GitHub Actions / CI** — los tests pasan local pero no hay enforcement automático.
    Diferido para mantener el alcance del Ciclo 4 acotado.
 
 ---
 
 ## 8. Lo que NO se hizo en este ciclo (deferred)
 
-- **Deploy real en Hetzner** — todo el material listo, ejecutar `bash scripts/deploy_hetzner.sh`
-- **Smoke test desde 3 dispositivos** — bloqueado por el deploy real
+- **Deploy real en Hetzner** — todo el material listo, queda como deploy alternativo
+  (ya tenemos HF Spaces funcional como hosting principal)
+- **Smoke test desde 3 dispositivos físicos** — pendiente del Ciclo 5 (UX cross-device)
 - **Quantización INT8 para tablet** — diferido a Ciclo 5
 - **Ensemble de los 5 modelos** — el deploy actual sirve uno
 - **Refinamiento del cálculo de Cobb** — método actual MAE = 23° (binario)
@@ -156,16 +165,18 @@ incompatibilidades de la matriz Python/gradio/huggingface_hub. Todo cerrado.**
 ### Lo que el Ciclo 5 puede asumir como dado
 - Repo estructurado, documentado, alineado a la rúbrica.
 - Pesos en HF Hub (intercambiables sin re-deploy).
-- Stack docker-compose listo para `up -d`.
-- 13 tests verificando contratos del deployment.
-- Runbook completo en `docs/DEPLOYMENT.md`.
-- App accesible públicamente (post-deploy de Elvis).
+- App pública corriendo en HF Spaces: `https://huggingface.co/spaces/ElvLandau/spine-segmentation`.
+- Smoke test automatizado verde via `gradio-client.predict()` (~13 s end-to-end).
+- Bug `gradio-client TypeError api_info` resuelto (Gradio 5.50.0 + huggingface_hub>=0.33.5).
+- Mecanismo de update reproducible: `python scripts/upload_to_space.py --repo ... --file ...`.
+- Stack docker-compose listo para `up -d` (deploy alternativo, no se necesita).
+- 14 tests verificando contratos del deployment (13 passing + 1 gated por checkpoints locales).
+- Runbook completo en `docs/DEPLOYMENT.md` (para el deploy alternativo Hetzner).
 
 ### Lo que el Ciclo 5 debe abordar
-- Smoke test cross-device + capturas.
-- Llenar `docs/DEPLOYMENT.md` sección 8 "Datos del despliegue actual" con
-  valores reales (IP, DOMAIN, tier, latencia, tamaño imagen).
+- Smoke test manual cross-device + capturas (móvil, tablet, desktop).
 - Refinamiento del modelo (augmentation agresiva, pre-training con RadImageNet, ensemble).
+- Mejorar Cobb multiclase para evitar el degenerado de 90° en pacientes normales.
 - Considerar quantización INT8 para edge.
 - Decidir si se agrega CI con GitHub Actions.
 - Redactar artículo IEEE/ACM si el deploy y los resultados lo soportan.

@@ -2,11 +2,11 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-17 noche | Ciclos: 1, 2, 3 completos. Ciclo 4: ✅ APP DESPLEGADA Y CORRIENDO, ⚠️ pendiente fix de `gradio-client TypeError` en /api_info | Proximo chat: ver [`docs/PROMPT_PROXIMO_CHAT.md`](docs/PROMPT_PROXIMO_CHAT.md)
+> Ultima actualizacion: 2026-05-17 noche | Ciclos: 1, 2, 3, 4 ✅ COMPLETOS. Ciclo 5: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
-> **⚠️ Estado real:** UI carga + 4 tabs visibles + pesos cargados, pero el boton "Analyze" no completa la llamada al backend por bug en gradio-client. Ver PROMPT_PROXIMO_CHAT.md para retomar.
+> **✅ Estado real:** App funcionando end-to-end. Bug `gradio-client TypeError api_info` resuelto via upgrade a Gradio 5.50.0 + bump de huggingface_hub a >=0.33.5. Smoke test verde (gradio-client predict devuelve 4 overlays + texto en ~13s).
 
 > **Si eres nuevo en el proyecto:** sigue la [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
 > antes de hacer cualquier cambio.
@@ -151,21 +151,23 @@ Algunos ground truth = ~90 grados exactos (limite matematico del arctan). Docume
 - [x] Notebook `03_informe_final.ipynb` estilo semestre anterior
 - [x] Artefacto formal: [`docs/CICLO_3_ARTEFACTOS.md`](docs/CICLO_3_ARTEFACTOS.md)
 
-### Ciclo 4 (codigo + infra cerrados — deploy real pendiente) — Despliegue
+### Ciclo 4 ✅ COMPLETO — Despliegue en HF Spaces
 - [x] Reorganizar carpetas (requisitos_universidad/, docs/metodologia/, archive/)
 - [x] Migrar pesos de OneDrive a Hugging Face Hub (script + guia)
 - [x] Parametrizar config.py con 12 env vars (.env.example documentado)
 - [x] app/ shim entrypoint (cumple convencion de la rubrica)
 - [x] Modulo weights.py con autodescarga desde HF Hub + cache
 - [x] Dockerfile v2 (multi-stage, usuario no-root, sin COPY checkpoints, healthcheck con curl)
-- [x] docker-compose.yml + Caddyfile (SSL automatico via Let's Encrypt + nip.io)
-- [x] Suite pytest (13 tests passing, 1 gated por requires_checkpoints)
+- [x] docker-compose.yml + Caddyfile (SSL automatico via Let's Encrypt + nip.io) — deploy alternativo, no usado
+- [x] Suite pytest (14 tests: 13 passing + 1 gated por requires_checkpoints)
 - [x] README v2 alineado a la rubrica (35+35+15+15)
 - [x] Runbook DEPLOYMENT.md + script reproducible deploy_hetzner.sh
-- [ ] **Ejecutar deploy real en Hetzner** (a cargo de Elvis: `bash scripts/deploy_hetzner.sh`)
-- [ ] **Smoke test desde 3 dispositivos** (depende del deploy real)
-- [ ] Completar `docs/DEPLOYMENT.md` seccion 8 con datos reales (IP, latencia, tier)
-- [ ] Tag `v1.0-deploy` despues del smoke test exitoso
+- [x] Pivote a HF Spaces como hosting principal (no Hetzner)
+- [x] Subida de pesos a `ElvLandau/spine-checkpoints` (226 MB en 2 .pth)
+- [x] Space `ElvLandau/spine-segmentation` desplegado y RUNNING
+- [x] **Fix bug `gradio-client TypeError api_info`** via upgrade a Gradio 5.50.0 + huggingface_hub>=0.33.5
+- [x] **Script reusable `scripts/upload_to_space.py`** (HfApi.upload_file, sin git push)
+- [x] **Smoke test end-to-end verde** (gradio-client predict devuelve 4 overlays + texto en ~13s)
 
 Artefacto: [`docs/CICLO_4_ARTEFACTOS.md`](docs/CICLO_4_ARTEFACTOS.md)
 Briefing original: [`docs/CICLO_4_DESPLIEGUE_BRIEF.md`](docs/CICLO_4_DESPLIEGUE_BRIEF.md)
@@ -353,3 +355,5 @@ Orden corto:
 | 2026-05-17 PM | Crear repo de pesos `ElvLandau/spine-checkpoints` publico en HF Hub | 2 .pth subidos via `scripts/upload_weights.py`: DeepLabV3+ multiclase (102 MB) + UNet binario (124 MB) = 226 MB total. |
 | 2026-05-17 PM | Force push al Space autorizado (1 vez) | El Space tenia un README placeholder auto-creado por HF; sobrescribir era necesario y seguro porque el Space era brand-new sin colaboradores. NO se uso force push para GitHub. |
 | 2026-05-17 PM | LFS para PDFs oficiales | HF Spaces rechaza binarios no-LFS via su hook xet. Los 2 PDFs de Coursera quedaron en LFS en el branch `space-deploy` (solo para el push al Space; main de GitHub mantiene los blobs originales). |
+| 2026-05-17 noche | Upgrade Gradio a 5.50.0 + bump huggingface_hub a >=0.33.5 | Resolvio el `TypeError: argument of type 'bool' is not iterable` en `gradio_client/utils.py:get_type()` que bloqueaba `/api_info` y por tanto el boton Analyze. La 5.0.1 tiene el bug; cualquier 5.30+ trae el fix del schema bool (issues GH #11116 y #11722); 5.50.0 es la ultima 5.x estable. El pin viejo de `huggingface_hub<0.28` era legacy de gradio 4.44 (`HfFolder`), y entraba en conflicto con el requisito de gradio 5.50 (`>=0.33.5`). |
+| 2026-05-17 noche | Script `scripts/upload_to_space.py` para subir cambios via HfApi (no git push) | El Space ya tiene historia LFS limpia que no queremos sobrescribir. `HfApi.upload_file()` y `create_commit()` permiten patchear archivos individuales en un commit atomico sin tocar git remoto. Patron hermano de `upload_weights.py`. |
