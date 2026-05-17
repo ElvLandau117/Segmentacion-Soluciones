@@ -103,9 +103,19 @@ def create_app(
             text_lines.append(f"\nVertebrae detected ({len(vertebrae)}):")
             text_lines.append(f"  {', '.join(vertebrae)}")
 
-        # Scoliosis assessment
-        if cobb_multi and cobb_multi.get("success"):
-            angle = cobb_multi["cobb_angle_deg"]
+        # Scoliosis assessment — based on the BINARY Cobb (more robust on our data:
+        # MAE 23 deg + Pearson 0.66, vs multiclass MAE 26-45 deg with negative correlation
+        # in the worst case). The multiclass value above is kept as anatomical reference
+        # (which vertebrae make up the curve), not as the severity criterion.
+        assessment_source = None
+        if cobb_binary and cobb_binary.get("success"):
+            assessment_source = ("Binary", cobb_binary["cobb_angle_deg"])
+        elif cobb_multi and cobb_multi.get("success"):
+            # Fallback only if the binary method failed
+            assessment_source = ("Multiclass fallback", cobb_multi["cobb_angle_deg"])
+
+        if assessment_source is not None:
+            source_label, angle = assessment_source
             if angle < 10:
                 assessment = "Normal (< 10 degrees)"
             elif angle < 25:
@@ -114,7 +124,7 @@ def create_app(
                 assessment = "Moderate scoliosis (25-40 degrees)"
             else:
                 assessment = "Severe scoliosis (> 40 degrees)"
-            text_lines.append(f"\nAssessment: {assessment}")
+            text_lines.append(f"\nAssessment ({source_label}): {assessment}")
 
         results_text = "\n".join(text_lines)
 
