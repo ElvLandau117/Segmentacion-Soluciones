@@ -2,11 +2,15 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-17 noche | Ciclos: 1, 2, 3, 4 ✅ COMPLETOS. Ciclo 5: pendiente brief.
+> Ultima actualizacion: 2026-05-17 noche | Ciclos: 1, 2, 3, 4, 5 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
-> **✅ Estado real:** App funcionando end-to-end. Bug `gradio-client TypeError api_info` resuelto via upgrade a Gradio 5.50.0 + bump de huggingface_hub a >=0.33.5. Smoke test verde (gradio-client predict devuelve 4 overlays + texto en ~13s).
+> **✅ Estado real:** App funcionando end-to-end con UX clinica mejorada (Ciclo 5):
+> visualizacion del Cobb con cajas + lineas tangentes (tipo Shi et al. 2025), UI dual-Cobb
+> con indicador de concordancia, Assessment basado en Cobb binary (mas robusto que multiclass).
+> Smoke remoto verde: caso S_21 (escoliosis) ahora se detecta como "Mild" correctamente
+> (antes salia "Normal" por usar el multiclass ruidoso).
 
 > **Si eres nuevo en el proyecto:** sigue la [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
 > antes de hacer cualquier cambio.
@@ -173,13 +177,36 @@ Artefacto: [`docs/CICLO_4_ARTEFACTOS.md`](docs/CICLO_4_ARTEFACTOS.md)
 Briefing original: [`docs/CICLO_4_DESPLIEGUE_BRIEF.md`](docs/CICLO_4_DESPLIEGUE_BRIEF.md)
 Prompt para retomar: [`docs/PROMPT_PROXIMO_CHAT.md`](docs/PROMPT_PROXIMO_CHAT.md)
 
-### Ciclo 5 (proximo) — Refinamiento + entrega final
+### Ciclo 5 ✅ COMPLETO — UX clinica del Cobb (sin reentrenamiento)
+Inspirado parcialmente en Shi et al. 2025 (`archive/2509.24898v1.pdf`).
+Sin replicar su modelo (no tenemos landmarks anotados), solo extrapolando
+ideas de visualizacion + fusion de mediciones.
+
+- [x] Assessment basado en Cobb binary (mas robusto; MAE 23° vs multi 26-45°)
+- [x] Visualizacion Cobb tipo Fig 1 del paper: cajas verdes en upper/lower
+      end vertebrae + lineas tangentes rojas a los endplates + header
+      con angulos. En `evaluation/visualize.py:draw_cobb_angle_visualization`.
+- [x] UI dual-Cobb: ambos metodos en paralelo + indicador de CONCORDANCIA
+      (<=5° alta / <=15° revisar / >15° discrepancia)
+- [x] Refactor: `build_results_text` extraido como helper testeable (puro)
+- [x] 4 tests nuevos (suite: 17 passed + 1 skipped)
+- [x] Deploy via `scripts/upload_to_space.py` (3 archivos, rebuild ~90s)
+- [x] Smoke test remoto verde — el caso S_21 que antes daba "Normal"
+      (multiclass=0.4°) ahora reporta "Mild scoliosis" correctamente
+      (binary=15.1°, concordancia: "Review recommended")
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md)
+
+### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
+- [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
+      post-proc, votacion robusta)
+- [ ] Enmascarar confidence map por la prediccion (idea identificada Ciclo 5)
+- [ ] Probar Seg-Grad-CAM en vez de Grad-CAM vanilla
 - [ ] Quantizacion INT8 para edge (tablet)
 - [ ] Refinamiento modelo (augmentation, ensemble, pre-training RadImageNet)
-- [ ] Mejorar MAE de Cobb (actual binario: 23 grados)
 - [ ] CI con GitHub Actions (opcional)
 - [ ] Articulo IEEE/ACM (si los resultados lo soportan)
-- [ ] Slides de sustentacion + demo en vivo
+- [ ] Slides de sustentacion + demo en vivo + smoke test cross-device
 
 ### Metricas (se actualiza al completar entrenamientos)
 ### TABLA FINAL — 5 MODELOS MULTICLASE ENTRENADOS
@@ -357,3 +384,7 @@ Orden corto:
 | 2026-05-17 PM | LFS para PDFs oficiales | HF Spaces rechaza binarios no-LFS via su hook xet. Los 2 PDFs de Coursera quedaron en LFS en el branch `space-deploy` (solo para el push al Space; main de GitHub mantiene los blobs originales). |
 | 2026-05-17 noche | Upgrade Gradio a 5.50.0 + bump huggingface_hub a >=0.33.5 | Resolvio el `TypeError: argument of type 'bool' is not iterable` en `gradio_client/utils.py:get_type()` que bloqueaba `/api_info` y por tanto el boton Analyze. La 5.0.1 tiene el bug; cualquier 5.30+ trae el fix del schema bool (issues GH #11116 y #11722); 5.50.0 es la ultima 5.x estable. El pin viejo de `huggingface_hub<0.28` era legacy de gradio 4.44 (`HfFolder`), y entraba en conflicto con el requisito de gradio 5.50 (`>=0.33.5`). |
 | 2026-05-17 noche | Script `scripts/upload_to_space.py` para subir cambios via HfApi (no git push) | El Space ya tiene historia LFS limpia que no queremos sobrescribir. `HfApi.upload_file()` y `create_commit()` permiten patchear archivos individuales en un commit atomico sin tocar git remoto. Patron hermano de `upload_weights.py`. |
+| 2026-05-17 noche | Assessment severity calculado sobre Cobb binary (no multiclass) | El binary es mas robusto en nuestros datos (MAE 23° + Pearson 0.66) vs multiclass (MAE 26-45°, correlacion negativa en DeepLabV3+: r=-0.20). El multiclass se queda visible como referencia anatomica (Upper-Lower vertebrae). Resuelve los falsos negativos donde escoliosis salia "Normal" por usar el multiclass ruidoso. |
+| 2026-05-17 noche | Visualizacion Cobb tipo Fig 1 del paper Shi et al. 2025 | Cajas verdes en upper/lower end vertebrae + lineas tangentes rojas a los endplates + header numerico. Mejora dramatica de UX clinica sin reanotar el dataset. Implementado en `evaluation/visualize.py:draw_cobb_angle_visualization`. |
+| 2026-05-17 noche | UI dual-Cobb con indicador de concordancia | Muestra binary y multiclass en paralelo + bloque CONCORDANCIA (<=5° alta / <=15° revisar / >15° discrepancia). Da al medico contexto para decidir, en vez de un solo numero. Pure helper `build_results_text` extraido a module-level para tests. |
+| 2026-05-17 noche | NO replicar paper Shi et al. 2025 completo | Su modelo HRNet+Swin+dual-task requiere landmarks anotados de upper/lower endplate por vertebra. Nuestro MaIA tiene mascaras de segmentacion (no landmarks). Reanotar es trabajo clinico de semanas, no viable en este semestre. Si extrapolamos sus ideas A (visualizacion) y B (fusion de mediciones) — Ciclo 5. VWI y SVD sobre matriz de angulos quedan fuera (requieren los mismos landmarks). |
