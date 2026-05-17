@@ -206,6 +206,137 @@ def plot_per_class_dice(
     plt.close()
 
 
+def draw_cobb_angle_visualization(
+    image: np.ndarray,
+    multiclass_mask: np.ndarray,
+    cobb_multiclass_result: dict,
+    cobb_binary_deg: Optional[float] = None,
+    scheme: str = "vertebrae_24",
+) -> np.ndarray:
+    """
+    Clinical-style Cobb angle figure inspired by Shi et al. 2025 (Fig. 1):
+    green semi-transparent boxes over the upper/lower end vertebrae,
+    red tangent lines along their endplate orientations extended across
+    the frame, and a header with the numeric angle.
+
+    Args:
+        image: (H, W, 3) RGB radiograph (uint8).
+        multiclass_mask: (H, W) integer class labels (vertebrae_24 by default).
+        cobb_multiclass_result: dict returned by `cobb_from_multiclass`. Must
+            include `upper_end_vertebra`, `lower_end_vertebra`, `cobb_angle_deg`
+            and `success`.
+        cobb_binary_deg: optional Cobb angle from the binary method, drawn as
+            a second header line for cross-reference.
+        scheme: class mapping scheme used by `extract_vertebra_info`.
+
+    Returns:
+        (H, W, 3) uint8 image with overlays.
+    """
+    # Lazy imports to avoid circulars at module import time
+    from spine_segmentation.data.class_mapping import get_class_names
+    from spine_segmentation.postprocessing.vertebra_ordering import (
+        compute_endplate_angles,
+        extract_vertebra_info,
+    )
+
+    vis = image.copy()
+    if vis.dtype != np.uint8:
+        vis = (vis * 255).astype(np.uint8) if vis.max() <= 1.0 else vis.astype(np.uint8)
+    h, w = vis.shape[:2]
+
+    # If multiclass failed, fall back to a text-only annotation so the panel
+    # still carries information (the binary method is usually still available).
+    if not cobb_multiclass_result or not cobb_multiclass_result.get("success"):
+        if cobb_binary_deg is not None:
+            cv2.putText(
+                vis, f"Cobb (Binary): {cobb_binary_deg:.1f} deg",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
+            )
+        cv2.putText(
+            vis, "Multiclass Cobb visualization unavailable",
+            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+        )
+        return vis
+
+    upper_name = cobb_multiclass_result.get("upper_end_vertebra")
+    lower_name = cobb_multiclass_result.get("lower_end_vertebra")
+    cobb_deg = float(cobb_multiclass_result.get("cobb_angle_deg", 0.0))
+
+    # Re-extract per-vertebra info to access bbox + region for drawing.
+    # `cobb_from_multiclass` discards bbox/region in its returned dict.
+    class_names = get_class_names(scheme)
+    vertebrae = extract_vertebra_info(multiclass_mask, class_names)
+    vertebrae = compute_endplate_angles(vertebrae)
+
+    upper_v = next((v for v in vertebrae if v["name"] == upper_name), None)
+    lower_v = next((v for v in vertebrae if v["name"] == lower_name), None)
+
+    if upper_v is None or lower_v is None:
+        cv2.putText(
+            vis, f"Cobb (Multiclass): {cobb_deg:.1f} deg",
+            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
+        )
+        if cobb_binary_deg is not None:
+            cv2.putText(
+                vis, f"Cobb (Binary): {cobb_binary_deg:.1f} deg",
+                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
+            )
+        return vis
+
+    # 1) Green semi-transparent fill over the two end vertebrae
+    color_mask = np.zeros_like(vis)
+    for v in (upper_v, lower_v):
+        region = (multiclass_mask == v["class_id"]).astype(np.uint8)
+        color_mask[region > 0] = [0, 255, 0]
+    vis = cv2.addWeighted(vis, 1.0, color_mask, 0.45, 0)
+
+    # 2) Bounding-box outline for emphasis
+    for v in (upper_v, lower_v):
+        min_row, min_col, max_row, max_col = v["bbox"]
+        cv2.rectangle(vis, (min_col, min_row), (max_col, max_row), (0, 200, 0), 2)
+
+    # 3) Tangent lines along each endplate direction, extended across the frame.
+    # skimage orientation is the angle (rad) between the row-axis (vertical)
+    # and the major axis, CCW. For a horizontal vertebra orientation ~= pi/2,
+    # so (sin, cos) gives a horizontal tangent. We extend in both directions.
+    line_len = max(w, h)
+    for v in (upper_v, lower_v):
+        theta = float(v["orientation"])
+        dx = np.sin(theta)
+        dy = np.cos(theta)
+        cx = float(v["centroid_x"])
+        cy = float(v["centroid_y"])
+        p1 = (int(round(cx - dx * line_len)), int(round(cy - dy * line_len)))
+        p2 = (int(round(cx + dx * line_len)), int(round(cy + dy * line_len)))
+        cv2.line(vis, p1, p2, (255, 0, 0), 2)
+
+    # 4) Header with both Cobb readings (multiclass = the curve shown, binary = robust check)
+    cv2.putText(
+        vis, f"Cobb (Multiclass): {cobb_deg:.1f} deg  ({upper_name} - {lower_name})",
+        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
+    )
+    if cobb_binary_deg is not None:
+        cv2.putText(
+            vis, f"Cobb (Binary): {cobb_binary_deg:.1f} deg  (more robust)",
+            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2,
+        )
+
+    # 5) Labels next to each end vertebra (white text, placed to the right of the bbox)
+    for v, label in (
+        (upper_v, f"Superior end vertebra ({upper_name})"),
+        (lower_v, f"Inferior end vertebra ({lower_name})"),
+    ):
+        min_row, min_col, max_row, max_col = v["bbox"]
+        text_x = min(max_col + 5, w - 220)
+        text_y = max(20, (min_row + max_row) // 2)
+        cv2.putText(
+            vis, label, (text_x, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1,
+        )
+
+    return vis
+
+
 def save_prediction_grid(
     images: list,
     masks: list,

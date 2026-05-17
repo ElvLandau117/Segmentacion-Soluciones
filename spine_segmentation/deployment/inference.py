@@ -170,37 +170,45 @@ class SpineSegmentationPipeline:
         results: dict,
         image: np.ndarray,
     ) -> np.ndarray:
-        """Create a visualization showing the Cobb angle measurement."""
-        vis = image.copy()
+        """Create a clinical-style Cobb angle visualization.
 
-        # Draw Cobb angle info from binary method
+        Delegates to `draw_cobb_angle_visualization`, which draws the Shi et al.
+        2025-style figure (green end-vertebra boxes + red tangent lines + numeric
+        header). Falls back to a plain text overlay when the multiclass mask is
+        unavailable.
+        """
+        from spine_segmentation.evaluation.visualize import draw_cobb_angle_visualization
+
         cobb_binary = results.get("cobb_binary")
-        if cobb_binary and cobb_binary.get("success"):
-            angle = cobb_binary["cobb_angle_deg"]
-            # Draw inflection points and lines
-            if "inflection_points" in cobb_binary:
-                for pt in cobb_binary["inflection_points"]:
-                    x, y = int(pt[0]), int(pt[1])
-                    cv2.circle(vis, (x, y), 5, (255, 0, 0), -1)
-
-            cv2.putText(vis, f"Binary Cobb: {angle:.1f} deg",
-                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-
-        # Draw Cobb angle info from multiclass method
         cobb_multi = results.get("cobb_multiclass")
-        if cobb_multi and cobb_multi.get("success"):
-            angle = cobb_multi["cobb_angle_deg"]
-            upper = cobb_multi.get("upper_end_vertebra", "?")
-            lower = cobb_multi.get("lower_end_vertebra", "?")
-            cv2.putText(vis, f"Multiclass Cobb: {angle:.1f} deg ({upper}-{lower})",
-                       (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        multiclass_mask = results.get("multiclass_mask")
 
-        # List detected vertebrae
-        vertebrae = results.get("vertebrae_detected", [])
-        if vertebrae:
-            text = f"Vertebrae: {', '.join(vertebrae[:10])}"
-            if len(vertebrae) > 10:
-                text += f"... (+{len(vertebrae)-10})"
-            cv2.putText(vis, text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cobb_binary_deg = None
+        if cobb_binary and cobb_binary.get("success"):
+            cobb_binary_deg = float(cobb_binary["cobb_angle_deg"])
 
-        return vis
+        if multiclass_mask is None or cobb_multi is None:
+            # Multiclass not available — produce a minimal text-only annotation
+            vis = image.copy()
+            if cobb_binary_deg is not None:
+                cv2.putText(
+                    vis, f"Cobb (Binary): {cobb_binary_deg:.1f} deg",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
+                )
+            vertebrae = results.get("vertebrae_detected", [])
+            if vertebrae:
+                text = f"Vertebrae: {', '.join(vertebrae[:10])}"
+                if len(vertebrae) > 10:
+                    text += f"... (+{len(vertebrae) - 10})"
+                cv2.putText(
+                    vis, text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+                )
+            return vis
+
+        return draw_cobb_angle_visualization(
+            image=image,
+            multiclass_mask=multiclass_mask,
+            cobb_multiclass_result=cobb_multi,
+            cobb_binary_deg=cobb_binary_deg,
+            scheme=self.scheme,
+        )
