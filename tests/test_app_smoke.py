@@ -138,15 +138,105 @@ def test_draw_cobb_angle_visualization_modifies_image():
         "upper_end_vertebra": "C7",
         "lower_end_vertebra": "T6",
     }
+    # Ciclo 5.1: pass the full dict (signature changed from `cobb_binary_deg: float`
+    # to `cobb_binary_result: dict` so the viz can overlay spline + inflection points)
+    cobb_binary_result = {"success": True, "cobb_angle_deg": 10.0}
 
     vis = draw_cobb_angle_visualization(
         image=image,
         multiclass_mask=mask,
         cobb_multiclass_result=cobb_result,
-        cobb_binary_deg=10.0,
+        cobb_binary_result=cobb_binary_result,
     )
 
     assert vis.shape == image.shape
     assert vis.dtype == np.uint8
     # Must have modified pixels (overlay/lines/text). Compare to original.
     assert not np.array_equal(vis, image)
+
+
+# ----------------------------------------------------------------------------
+# Cobb visualization helpers — Ciclo 5.1
+# ----------------------------------------------------------------------------
+
+def test_line_intersection_handles_parallel_and_crossing():
+    """The helper must return None for parallel lines and a finite point for
+    crossing lines, so the orchestrator can decide between drawing the arc
+    or falling back to the speedometer."""
+    import numpy as np
+    from spine_segmentation.evaluation.visualize import _line_intersection
+
+    # Two horizontal lines at different y -> parallel -> None
+    assert _line_intersection((0.0, 0.0), (1.0, 0.0), (0.0, 5.0), (1.0, 0.0)) is None
+
+    # Crossing at (1, 0): horizontal y=0 vs vertical x=1
+    pt = _line_intersection((0.0, 0.0), (1.0, 0.0), (1.0, -1.0), (0.0, 1.0))
+    assert pt is not None
+    assert abs(pt[0] - 1.0) < 1e-6
+    assert abs(pt[1] - 0.0) < 1e-6
+
+
+def test_endplate_vectors_are_perpendicular_unit_vectors():
+    """For a horizontal vertebra (orientation = pi/2) the tangent must be
+    horizontal and the perpendicular vertical (in image coords, y-down).
+    Both must be unit vectors and orthogonal."""
+    import numpy as np
+    from spine_segmentation.evaluation.visualize import _endplate_vectors
+
+    tan, perp = _endplate_vectors(np.pi / 2)
+    # tan ~= (1, 0), perp ~= (0, -1)
+    assert abs(tan[0] - 1.0) < 1e-6
+    assert abs(tan[1] - 0.0) < 1e-6
+    assert abs(perp[0] - 0.0) < 1e-6
+    assert abs(perp[1] - (-1.0)) < 1e-6
+    # Orthogonality
+    dot = tan[0] * perp[0] + tan[1] * perp[1]
+    assert abs(dot) < 1e-6
+
+
+def test_speedometer_draws_inside_the_image():
+    """The bottom-left mini gauge must touch pixels in the lower portion of
+    the image. This is the visual fallback for tiny Cobb angles (<8 deg) where
+    the in-frame arc would be unreadable, so it has to be actually rendered."""
+    import numpy as np
+    from spine_segmentation.evaluation.visualize import _draw_speedometer
+
+    h, w = 400, 300
+    vis = np.zeros((h, w, 3), dtype=np.uint8)
+    _draw_speedometer(vis, angle_deg=3.5)
+    # Upper half should still be untouched
+    assert vis[:h // 2, :, :].sum() == 0
+    # Lower half should have non-zero pixels (the gauge)
+    assert vis[h // 2:, :, :].sum() > 0
+
+
+def test_binary_overlay_renders_spline_and_inflection_points():
+    """When the binary result carries a fitted spline and inflection points,
+    the overlay must actually paint them so the user can trace how the binary
+    angle was computed (educational value + credibility)."""
+    import numpy as np
+    from spine_segmentation.evaluation.visualize import _draw_binary_overlay
+
+    h, w = 200, 100
+    vis = np.zeros((h, w, 3), dtype=np.uint8)
+    spline_x = list(np.linspace(50, 50, 50))  # vertical spline at x=50
+    spline_y = list(np.linspace(20, 180, 50))
+    cobb_binary = {
+        "success": True,
+        "spline_x": spline_x,
+        "spline_y": spline_y,
+        "inflection_points": [(50.0, 60.0), (50.0, 140.0)],
+    }
+    _draw_binary_overlay(vis, cobb_binary)
+
+    # Spline polyline should leave white-ish pixels in the central column
+    central = vis[:, 48:53, :]
+    assert central.sum() > 0
+    # Inflection points are yellow (B=0, G=255, R=255 in cv2 BGR), and they
+    # are filled circles of radius 5 — there should be plenty of yellow pixels.
+    yellow = (vis[..., 0] < 30) & (vis[..., 1] > 200) & (vis[..., 2] > 200)
+    assert yellow.sum() > 30  # at least the two filled circles
+
+    # Skip-path: a failed binary result must not raise.
+    _draw_binary_overlay(vis, None)
+    _draw_binary_overlay(vis, {"success": False, "error": "x"})
