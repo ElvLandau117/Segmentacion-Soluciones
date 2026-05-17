@@ -1,0 +1,90 @@
+# =============================================================================
+# docker-compose.yml — Spine Segmentation production stack (Ciclo 4)
+#
+# Two services on a private bridge network:
+#   - app    : Gradio + model inference (CPU-only).  Not exposed publicly.
+#   - caddy  : Reverse proxy + automatic HTTPS via Let's Encrypt.  Public.
+#
+# Bring up:    docker compose up -d --build
+# Logs:        docker compose logs -f app
+# Update:      git pull && docker compose up -d --build
+# Tear down:   docker compose down            (preserves the weights cache)
+# Hard reset:  docker compose down -v         (drops volumes — re-downloads
+#                                              weights from HF Hub on next run)
+# =============================================================================
+
+services:
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: spine-app:latest
+    container_name: spine_app
+    restart: unless-stopped
+
+    # Env vars come from .env in the project root (see .env.example).
+    # The deployment ones that MUST be set on the server: HF_REPO_ID
+    # (and HF_TOKEN if the repo is private).
+    env_file:
+      - .env
+
+    # Internal-only port. Caddy is the public face.
+    expose:
+      - "7860"
+
+    # HF weight cache survives `docker compose down` so we don't re-download
+    # ~200 MB on every restart.
+    volumes:
+      - checkpoints_cache:/data/checkpoints
+
+    # Healthcheck mirrors the Dockerfile's but Compose surfaces the status
+    # in `docker compose ps` and gates Caddy's start.
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:7860/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+    networks:
+      - spine_net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: spine_caddy
+    restart: unless-stopped
+
+    # 80 = ACME HTTP challenge for Let's Encrypt.  443 = HTTPS.
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data         # persists Let's Encrypt certificates
+      - caddy_config:/config
+
+    environment:
+      # Override DOMAIN in .env to point at your real hostname or a different
+      # nip.io subdomain.  Defaults to a placeholder so an unconfigured
+      # `docker compose up` fails loudly with a 404 instead of silently
+      # serving the wrong host.
+      - DOMAIN=${DOMAIN:-replace-me.nip.io}
+
+    # Wait for the app to be healthy before fronting it.
+    depends_on:
+      app:
+        condition: service_healthy
+
+    networks:
+      - spine_net
+
+volumes:
+  checkpoints_cache:    # cache of .pth files downloaded from HF Hub
+  caddy_data:           # Let's Encrypt account + issued certificates
+  caddy_config:         # Caddy's own auto-config
+
+networks:
+  spine_net:
+    driver: bridge

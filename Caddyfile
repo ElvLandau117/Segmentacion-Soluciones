@@ -1,0 +1,44 @@
+# =============================================================================
+# Caddyfile — public reverse proxy for the Spine Segmentation app.
+#
+# Caddy obtains and renews TLS certificates from Let's Encrypt automatically
+# for the hostname in DOMAIN.  Just point a DNS record (or use nip.io /
+# sslip.io for a poor man's domain) at this server's public IP.
+#
+# To use nip.io: take your IP (e.g. 5.9.123.45) and write 5-9-123-45.nip.io.
+# nip.io will resolve that hostname to your IP automatically; Let's Encrypt
+# is happy to issue certificates for it.
+#
+# Set the hostname in .env:   DOMAIN=5-9-123-45.nip.io
+# =============================================================================
+
+{$DOMAIN} {
+    # gzip + zstd compression for the Gradio assets (JS, CSS, images)
+    encode gzip zstd
+
+    # Forward everything to the internal app service.
+    # Gradio uses websockets for streaming; reverse_proxy handles them OK by default.
+    reverse_proxy app:7860
+
+    # Reasonable upload limit for radiographs (a clean X-ray is < 10 MB).
+    request_body {
+        max_size 25MB
+    }
+
+    # Hardening: a few security headers that cost nothing.
+    header {
+        # Prevent clickjacking
+        X-Frame-Options "SAMEORIGIN"
+        # No content-type sniffing
+        X-Content-Type-Options "nosniff"
+        # HSTS — 6 months, leave subdomains out (nip.io covers many users)
+        Strict-Transport-Security "max-age=15768000"
+        # Remove the default Server header so we don't advertise Caddy version
+        -Server
+    }
+
+    # Useful for `curl https://<domain>/health` and uptime monitors.
+    # Gradio also responds with 200 on /, so this is belt-and-suspenders.
+    @health path /health
+    respond @health "OK" 200
+}
