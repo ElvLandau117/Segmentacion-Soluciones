@@ -232,10 +232,11 @@ def test_binary_overlay_renders_spline_and_inflection_points():
     # Spline polyline should leave white-ish pixels in the central column
     central = vis[:, 48:53, :]
     assert central.sum() > 0
-    # Inflection points are yellow (B=0, G=255, R=255 in cv2 BGR), and they
-    # are filled circles of radius 5 — there should be plenty of yellow pixels.
-    yellow = (vis[..., 0] < 30) & (vis[..., 1] > 200) & (vis[..., 2] > 200)
-    assert yellow.sum() > 30  # at least the two filled circles
+    # Inflection points are filled yellow circles (R=255, G=255, B=0) — the
+    # function uses RGB conventions because the upstream image comes from
+    # Gradio as RGB. Two circles of radius 5 -> ~150 yellow pixels.
+    yellow = (vis[..., 0] > 200) & (vis[..., 1] > 200) & (vis[..., 2] < 30)
+    assert yellow.sum() > 30
 
     # Skip-path: a failed binary result must not raise.
     _draw_binary_overlay(vis, None)

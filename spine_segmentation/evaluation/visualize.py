@@ -288,7 +288,7 @@ def _draw_speedometer(vis, angle_deg, position=None):
     rad = np.radians(visual_angle)
     tip = (int(cx + (radius - 8) * np.cos(rad)),
            int(cy + (radius - 8) * np.sin(rad)))
-    cv2.line(vis, (cx, cy), tip, (0, 0, 255), 2, lineType=cv2.LINE_AA)
+    cv2.line(vis, (cx, cy), tip, (255, 0, 0), 2, lineType=cv2.LINE_AA)
     cv2.putText(vis, "Cobb", (cx - 18, cy - radius - 6),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, lineType=cv2.LINE_AA)
     cv2.putText(vis, f"{angle_deg:.1f}deg", (cx - radius + 2, cy + radius + 18),
@@ -306,8 +306,10 @@ def _draw_binary_overlay(vis, cobb_binary_result):
     if spline_x and spline_y and len(spline_x) > 1:
         pts = np.array(list(zip(spline_x, spline_y)), dtype=np.int32)
         cv2.polylines(vis, [pts], False, (235, 235, 235), 1, lineType=cv2.LINE_AA)
+    # Yellow filled circles for inflection points (RGB convention, not BGR);
+    # we use yellow here to differentiate from the cyan endplate markers.
     for (ix, iy) in cobb_binary_result.get("inflection_points") or []:
-        cv2.circle(vis, (int(ix), int(iy)), 5, (0, 255, 255), -1, lineType=cv2.LINE_AA)
+        cv2.circle(vis, (int(ix), int(iy)), 5, (255, 255, 0), -1, lineType=cv2.LINE_AA)
         cv2.circle(vis, (int(ix), int(iy)), 5, (0, 0, 0), 1, lineType=cv2.LINE_AA)
 
 
@@ -455,7 +457,7 @@ def draw_cobb_angle_visualization(
                 vis,
                 (int(round(cen[0])), int(round(cen[1]))),
                 (int(round(intersection[0])), int(round(intersection[1]))),
-                (0, 0, 255), 2, lineType=cv2.LINE_AA,
+                (255, 0, 0), 2, lineType=cv2.LINE_AA,
             )
     else:
         fixed_len = 180.0
@@ -469,14 +471,14 @@ def draw_cobb_angle_visualization(
                 vis,
                 (int(round(cen[0])), int(round(cen[1]))),
                 p2,
-                (0, 0, 255), 2, lineType=cv2.LINE_AA,
+                (255, 0, 0), 2, lineType=cv2.LINE_AA,
             )
 
     # 7) Arc at the intersection (skip when angle is too small to be readable).
     if intersection_in_frame and cobb_deg > 1.0:
         radius = float(np.clip(30.0 + cobb_deg * 1.5, 35.0, 90.0))
         _draw_angle_arc(vis, intersection, perp_vecs[0], perp_vecs[1],
-                        radius, cobb_deg, (0, 0, 255))
+                        radius, cobb_deg, (255, 0, 0))
 
     # 8) Speedometer fallback for tiny angles or out-of-frame intersections.
     if cobb_deg < 8.0 or not intersection_in_frame:
