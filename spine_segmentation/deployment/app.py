@@ -6,21 +6,19 @@ Provides an interactive interface for uploading radiographs and viewing results.
 import gradio as gr
 import numpy as np
 import cv2
-from pathlib import Path
 
-from spine_segmentation.config import CHECKPOINTS_DIR, MODEL_CONFIGS
+from spine_segmentation.config import (
+    APP_HOST,
+    APP_PORT,
+    DEFAULT_BINARY_MODEL,
+    DEFAULT_MULTICLASS_MODEL,
+    MEDICAL_DISCLAIMER,
+    MODEL_CONFIGS,
+)
+from spine_segmentation.data.transforms import get_inference_transforms, resize_with_padding
 from spine_segmentation.deployment.inference import SpineSegmentationPipeline
-from spine_segmentation.evaluation.explainability import generate_gradcam, generate_confidence_map
-from spine_segmentation.data.transforms import resize_with_padding, get_inference_transforms
-
-
-def find_best_checkpoints() -> dict:
-    """Find available model checkpoints."""
-    checkpoints = {}
-    for f in CHECKPOINTS_DIR.glob("*.pth"):
-        name = f.stem
-        checkpoints[name] = str(f)
-    return checkpoints
+from spine_segmentation.deployment.weights import ensure_weights
+from spine_segmentation.evaluation.explainability import generate_confidence_map, generate_gradcam
 
 
 def create_app(
@@ -220,10 +218,9 @@ def create_app(
         )
 
         gr.Markdown(
-            """
+            f"""
             ---
-            **Note:** This tool is for educational and research purposes only.
-            It should not be used as a substitute for professional medical diagnosis.
+            **Aviso medico / Medical disclaimer:** {MEDICAL_DISCLAIMER}
 
             *MaIA - Master's in Artificial Intelligence - Universidad de los Andes*
             """
@@ -233,40 +230,47 @@ def create_app(
 
 
 def main():
-    """Launch the Gradio application."""
+    """Launch the Gradio application.
+
+    Configuration source priority: CLI args > env vars (config.py defaults) > hardcoded fallbacks.
+    Args exist for local dev; the container relies entirely on env vars.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Spine Segmentation Web App")
     parser.add_argument("--binary-checkpoint", type=str, default=None,
-                       help="Path to binary model checkpoint")
+                       help="Override the binary .pth path (default: from HF Hub / cache)")
     parser.add_argument("--multiclass-checkpoint", type=str, default=None,
-                       help="Path to multiclass model checkpoint")
-    parser.add_argument("--binary-model", type=str, default="unet_resnet50",
+                       help="Override the multiclass .pth path (default: from HF Hub / cache)")
+    parser.add_argument("--binary-model", type=str, default=DEFAULT_BINARY_MODEL,
                        choices=list(MODEL_CONFIGS.keys()))
-    parser.add_argument("--multiclass-model", type=str, default="unet_resnet50",
+    parser.add_argument("--multiclass-model", type=str, default=DEFAULT_MULTICLASS_MODEL,
                        choices=list(MODEL_CONFIGS.keys()))
-    parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument("--host", type=str, default=APP_HOST)
+    parser.add_argument("--port", type=int, default=APP_PORT)
     parser.add_argument("--share", action="store_true",
-                       help="Create a public Gradio link")
+                       help="Create a public Gradio share link (dev only)")
     args = parser.parse_args()
 
-    # Auto-discover checkpoints if not specified
-    if args.binary_checkpoint is None:
-        for model_name in MODEL_CONFIGS:
-            path = CHECKPOINTS_DIR / f"{model_name}_binary_best.pth"
-            if path.exists():
-                args.binary_checkpoint = str(path)
-                print(f"Auto-discovered binary checkpoint: {path}")
-                break
+    # Resolve checkpoints: local cache -> HF Hub -> None
+    # Unless explicitly overridden via CLI.
+    if args.binary_checkpoint is None or args.multiclass_checkpoint is None:
+        resolved = ensure_weights()
+        if args.binary_checkpoint is None and resolved["binary"] is not None:
+            args.binary_checkpoint = str(resolved["binary"])
+        if args.multiclass_checkpoint is None and resolved["multiclass"] is not None:
+            args.multiclass_checkpoint = str(resolved["multiclass"])
 
-    if args.multiclass_checkpoint is None:
-        for model_name in MODEL_CONFIGS:
-            path = CHECKPOINTS_DIR / f"{model_name}_multiclass_best.pth"
-            if path.exists():
-                args.multiclass_checkpoint = str(path)
-                args.multiclass_model = model_name
-                print(f"Auto-discovered multiclass checkpoint: {path}")
-                break
+    if args.binary_checkpoint:
+        print(f"[app] binary checkpoint: {args.binary_checkpoint}")
+    if args.multiclass_checkpoint:
+        print(f"[app] multiclass checkpoint: {args.multiclass_checkpoint}")
+    if not args.binary_checkpoint and not args.multiclass_checkpoint:
+        print(
+            "[app] WARNING: no checkpoints available. The UI will start but "
+            "predictions will fail until weights are provided "
+            "(set HF_REPO_ID or pass --*-checkpoint)."
+        )
 
     app = create_app(
         binary_checkpoint=args.binary_checkpoint,
@@ -276,7 +280,7 @@ def main():
     )
 
     app.launch(
-        server_name="0.0.0.0",
+        server_name=args.host,
         server_port=args.port,
         share=args.share,
     )
