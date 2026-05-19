@@ -114,7 +114,12 @@ class SpineSegmentationPipeline:
                     binary_logits = self.binary_model(input_tensor)
 
             binary_prob = torch.sigmoid(binary_logits).cpu().numpy()[0, 0]
-            binary_mask = (binary_prob > 0.5).astype(np.uint8)
+            # Ciclo 5.3 fix A: lower threshold 0.5 -> 0.3 to accept marginal
+            # spine pixels (esp. lumbar zone). Fragmented detections get
+            # bridged by the vertical-kernel closing inside clean_binary_mask
+            # (fix B) and then filtered to the largest connected component,
+            # so the only blobs that survive are still spine-shaped.
+            binary_mask = (binary_prob > 0.3).astype(np.uint8)
             binary_mask = clean_binary_mask(binary_mask)
             results["binary_mask"] = binary_mask
             results["binary_overlay"] = self._create_overlay(image_resized, binary_mask, "binary")
