@@ -245,6 +245,44 @@ def test_binary_overlay_renders_spline_and_inflection_points():
 
 
 # ----------------------------------------------------------------------------
+# Binary mask cleanup — Ciclo 5.3 (fix B)
+# ----------------------------------------------------------------------------
+
+def test_clean_binary_mask_bridges_vertical_gap():
+    """A thoracic fragment + a lumbar fragment separated by a small vertical
+    gap must merge into a single connected component after clean_binary_mask.
+    Before Ciclo 5.3 the largest-CC step ran first and dropped the smaller
+    fragment, leaving only half of the spine for the spline fit."""
+    import numpy as np
+    from skimage.measure import label as cc_label
+    from spine_segmentation.postprocessing.morphology import clean_binary_mask
+
+    H, W = 512, 512
+    mask = np.zeros((H, W), dtype=np.uint8)
+    # Thoracic fragment: rows 80-230 (height 150), cols 250-270 (width 20)
+    mask[80:230, 250:270] = 1
+    # Lumbar fragment: rows 250-410 (height 160), cols 250-270 — gap of 20 rows
+    mask[250:410, 250:270] = 1
+    raw_components = cc_label(mask).max()
+    assert raw_components == 2, "fixture must start as two separate components"
+
+    cleaned = clean_binary_mask(mask)
+
+    # After the vertical closing inserted by fix B, both fragments should be
+    # bridged into a single connected component.
+    n_components = cc_label(cleaned).max()
+    assert n_components == 1, (
+        f"expected 1 connected component after bridging, got {n_components}"
+    )
+    # Total area should include both fragments plus the bridge — i.e. clearly
+    # more than just the larger fragment alone (which would be the result if
+    # the bridge had failed and largest-CC kept only the lumbar piece).
+    assert cleaned.sum() > 160 * 20 * 1.5, (
+        f"expected combined area, got only {cleaned.sum()} px (single fragment?)"
+    )
+
+
+# ----------------------------------------------------------------------------
 # Multi-curve detection — Ciclo 5.2
 # ----------------------------------------------------------------------------
 

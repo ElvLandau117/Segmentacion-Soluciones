@@ -13,25 +13,40 @@ from skimage.morphology import skeletonize, remove_small_objects
 def clean_binary_mask(mask: np.ndarray, min_size: int = 500) -> np.ndarray:
     """
     Post-process binary segmentation mask.
-    1. Threshold
-    2. Morphological opening (remove noise)
-    3. Keep largest connected component
-    4. Morphological closing (fill holes)
+
+    Pipeline:
+      1. Morphological opening (remove small isolated noise)
+      2. Vertical closing (bridge spine fragments along the body axis) — added
+         in Ciclo 5.3 fix B. Tall narrow kernel reconnects a lumbar fragment
+         that the binary threshold left disconnected from the thoracic main
+         component. Runs BEFORE the largest-CC filter so the lumbar fragment
+         is not dropped before it can rejoin the main spine.
+      3. Keep the largest connected component
+      4. Morphological closing (fill small holes — ellipse for round artifacts)
 
     Args:
         mask: (H, W) binary prediction {0, 1}
-        min_size: Minimum component size in pixels
+        min_size: Minimum component size in pixels (currently unused; reserved
+            for future filtering of multi-component scenarios)
 
     Returns:
         Cleaned binary mask
     """
     mask = mask.astype(np.uint8)
 
-    # Morphological opening (remove small noise)
+    # 1. Morphological opening (remove small noise)
     kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
 
-    # Keep only the largest connected component
+    # 2. Vertical closing — bridge spine fragments along the body axis.
+    # A 25 px tall, 3 px wide rect kernel reaches ~12 px up and ~12 px down
+    # from any foreground pixel. That spans a typical lumbar gap (10-20 px on
+    # 512x512 radiographs) without pulling in lateral structures like ribs.
+    # Ciclo 5.3 fix B.
+    kernel_vertical = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 25))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_vertical)
+
+    # 3. Keep only the largest connected component
     labeled = label(mask)
     if labeled.max() == 0:
         return mask
@@ -40,7 +55,7 @@ def clean_binary_mask(mask: np.ndarray, min_size: int = 500) -> np.ndarray:
     largest = max(regions, key=lambda r: r.area)
     mask = (labeled == largest.label).astype(np.uint8)
 
-    # Morphological closing (fill small holes)
+    # 4. Morphological closing (fill small holes)
     kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
 
