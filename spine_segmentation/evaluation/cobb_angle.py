@@ -66,8 +66,8 @@ def _curve_direction(dx_dy: np.ndarray, ip_a: int, ip_b: int) -> str:
 
 def cobb_from_binary(
     binary_mask: np.ndarray,
-    smoothing_factor: float = 5000.0,
-    min_curve_deg: float = 3.0,
+    smoothing_factor: float = 1500.0,
+    min_curve_deg: float = 2.0,
 ) -> dict:
     """Calculate the Cobb angle from a binary spine segmentation mask, with
     support for multiple curves (S-shape, triple).
@@ -83,8 +83,16 @@ def cobb_from_binary(
 
     Args:
         binary_mask: (H, W) binary spine mask {0, 1}
-        smoothing_factor: B-spline smoothing parameter
-        min_curve_deg: ignore curves below this angle (default 3 deg ~= noise)
+        smoothing_factor: B-spline smoothing parameter. Lowered from 5000 to
+            1500 in Ciclo 5.3 (fix C) so subtle inflection points in mild /
+            compensatory curves are not smoothed away. The internal fallback
+            still divides this by 5 if <2 IPs are found, so a default of 1500
+            yields a fallback of 300 — aggressive but only triggered on very
+            flat splines.
+        min_curve_deg: ignore curves below this angle. Lowered from 3.0 to 2.0
+            in Ciclo 5.3 (fix D) to surface mild compensatory curves that
+            still carry clinical signal. Curves under 2 deg are likely spline
+            noise and stay filtered.
 
     Returns:
         dict with:
