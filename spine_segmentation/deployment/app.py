@@ -56,6 +56,30 @@ def rotate_image_for_analysis(image: np.ndarray, deg: float) -> np.ndarray:
     )
 
 
+def preview_rotation_for_display(original: np.ndarray, deg: float) -> np.ndarray:
+    """Rotate the stashed ORIGINAL image for live preview (Ciclo 5.6).
+
+    Called by the Gradio slider.change handler so the clinician sees the
+    rotation result before committing 10s of CPU to Analyze. Operates on
+    the original (stashed in gr.State at upload time), NOT on whatever is
+    currently displayed — that prevents accumulated double-rotations as
+    the slider drags through intermediate values.
+
+    Args:
+        original: the image as uploaded by the user; None when nothing
+            has been uploaded yet.
+        deg: current slider value in degrees.
+
+    Returns:
+        Rotated image, or None when `original` is None (slider moved
+        before any upload). The Gradio Image component accepts None and
+        clears the display, which is the right thing here.
+    """
+    if original is None:
+        return None
+    return rotate_image_for_analysis(original, deg)
+
+
 def build_results_text(
     cobb_binary: dict | None,
     cobb_multiclass: dict | None,
@@ -334,15 +358,16 @@ def create_app(
             multiclass_model_name=multiclass_model_name,
         )
 
-    def predict(input_image, rotation_deg=0.0):
-        """Process uploaded radiograph, optionally rotated by `rotation_deg`.
+    def predict(input_image):
+        """Process the (already-rotated) radiograph shown in the UI.
 
-        Ciclo 5.5: the UI slider lets the clinician straighten a tilted
-        radiograph before analysis. The rotation is applied here, in the
-        UI layer, BEFORE the segmentation pipeline runs — so the pipeline
-        sees an image whose spine is as vertical as the clinician thinks
-        is best. The rotation warning from Ciclo 5.4 stays useful as a
-        post-hoc check ("you rotated, but it's still tilted X deg").
+        Ciclo 5.6: the rotation is now applied LIVE in the UI via the
+        slider + 5 quick buttons. By the time the user clicks Analyze,
+        `input_image` is the displayed (already-rotated) image, so
+        predict() no longer needs a `rotation_deg` argument — it just
+        delegates to the pipeline. The ROTATION WARNING from Ciclo 5.4
+        still fires if the SVD sees residual tilt > 12 deg post-rotation
+        ("you rotated, but it's still tilted").
         """
         if input_image is None:
             return None, None, None, None, "Please upload a radiograph image."
@@ -356,10 +381,7 @@ def create_app(
         elif input_image.shape[2] == 4:
             input_image = cv2.cvtColor(input_image, cv2.COLOR_RGBA2RGB)
 
-        # Apply manual rotation (Ciclo 5.5) BEFORE handing to the pipeline.
-        input_image = rotate_image_for_analysis(input_image, rotation_deg)
-
-        # Run prediction
+        # Run prediction (image is already rotated by the UI preview pipeline)
         results = pipeline.predict(input_image)
 
         # Prepare outputs
@@ -441,10 +463,15 @@ def create_app(
         with gr.Row():
             with gr.Column(scale=1):
                 input_image = gr.Image(
-                    label="Upload Spinal X-ray Radiograph",
+                    label="Upload Spinal X-ray Radiograph (drag the slider to rotate)",
                     type="numpy",
                     height=500,
                 )
+                # Ciclo 5.6: gr.State stashes the ORIGINAL upload so the
+                # slider can rotate a fresh copy each time, instead of
+                # accumulating rotations on whatever happens to be shown.
+                original_image_state = gr.State(value=None)
+
                 # Ciclo 5.5: manual rotation. The clinician decides if the
                 # uploaded radiograph needs to be straightened before the
                 # binary Cobb pipeline (which fits x = f(y), assuming a
@@ -493,33 +520,72 @@ def create_app(
                     interactive=False,
                 )
 
-        # Quick-rotation buttons: each adjusts the slider value by a fixed
-        # delta. Reset jumps to 0. Values are clamped to (-180, 180) by
-        # Gradio's slider bounds.
-        def _adjust_rotation(current, delta):
-            return float(max(-180.0, min(180.0, (current or 0.0) + delta)))
+        # ----- Ciclo 5.6 live preview wiring -----
+        # The original-image state preserves what the user uploaded so the
+        # slider can rotate a fresh copy each frame (no accumulated double-
+        # rotation). Three event paths drive the preview:
+        #   (a) input_image.upload  -> stash original + reset slider to 0
+        #   (b) rotation_slider.change -> rotate stashed original -> display
+        #   (c) quick rotation buttons -> update slider + display in one go
+
+        def _on_upload(img):
+            """Stash the upload, reset slider to 0 so the new image shows
+            unrotated. Returns (state, slider) — UPLOAD does not fire when
+            the preview writes back to input_image, so this only runs for
+            actual user uploads (no loop)."""
+            return img, 0.0
+
+        input_image.upload(
+            fn=_on_upload,
+            inputs=[input_image],
+            outputs=[original_image_state, rotation_slider],
+        )
+
+        rotation_slider.change(
+            fn=preview_rotation_for_display,
+            inputs=[original_image_state, rotation_slider],
+            outputs=[input_image],
+        )
+
+        def _rotate_by(current_slider, original, delta):
+            """Quick-button handler: compute the new slider value, rotate
+            the original by it, return BOTH so the slider widget and the
+            displayed image update in one Gradio round-trip. More robust
+            than relying on the slider.change event to fire after a
+            programmatic value update."""
+            new_slider = float(max(-180.0, min(180.0, (current_slider or 0.0) + delta)))
+            rotated = preview_rotation_for_display(original, new_slider)
+            return new_slider, rotated
 
         btn_rot_minus_90.click(
-            fn=lambda v: _adjust_rotation(v, -90),
-            inputs=[rotation_slider], outputs=[rotation_slider],
+            fn=lambda s, o: _rotate_by(s, o, -90),
+            inputs=[rotation_slider, original_image_state],
+            outputs=[rotation_slider, input_image],
         )
         btn_rot_minus_5.click(
-            fn=lambda v: _adjust_rotation(v, -5),
-            inputs=[rotation_slider], outputs=[rotation_slider],
+            fn=lambda s, o: _rotate_by(s, o, -5),
+            inputs=[rotation_slider, original_image_state],
+            outputs=[rotation_slider, input_image],
         )
-        btn_rot_reset.click(fn=lambda: 0.0, outputs=[rotation_slider])
+        btn_rot_reset.click(
+            fn=lambda o: (0.0, o),  # slider=0, display the un-rotated original
+            inputs=[original_image_state],
+            outputs=[rotation_slider, input_image],
+        )
         btn_rot_plus_5.click(
-            fn=lambda v: _adjust_rotation(v, 5),
-            inputs=[rotation_slider], outputs=[rotation_slider],
+            fn=lambda s, o: _rotate_by(s, o, 5),
+            inputs=[rotation_slider, original_image_state],
+            outputs=[rotation_slider, input_image],
         )
         btn_rot_plus_90.click(
-            fn=lambda v: _adjust_rotation(v, 90),
-            inputs=[rotation_slider], outputs=[rotation_slider],
+            fn=lambda s, o: _rotate_by(s, o, 90),
+            inputs=[rotation_slider, original_image_state],
+            outputs=[rotation_slider, input_image],
         )
 
         predict_btn.click(
             fn=predict,
-            inputs=[input_image, rotation_slider],
+            inputs=[input_image],  # already-rotated by the preview pipeline
             outputs=[binary_output, multi_output, cobb_output, explain_output, results_text],
         )
 
