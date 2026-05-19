@@ -16,6 +16,12 @@ from spine_segmentation.config import (
     MODEL_CONFIGS,
 )
 from spine_segmentation.data.transforms import get_inference_transforms, resize_with_padding
+from spine_segmentation.deployment.i18n import (
+    DEFAULT_LANG,
+    header_markdown,
+    label_to_lang,
+    t,
+)
 from spine_segmentation.deployment.inference import SpineSegmentationPipeline
 from spine_segmentation.deployment.weights import ensure_weights
 from spine_segmentation.evaluation.explainability import generate_confidence_map, generate_gradcam
@@ -86,6 +92,7 @@ def build_results_text(
     vertebrae_detected: list | None = None,
     coverage_info: dict | None = None,
     orientation_info: dict | None = None,
+    language: str = DEFAULT_LANG,
 ) -> str:
     """Render the multi-line Diagnosis Results panel with multi-curve support.
 
@@ -129,37 +136,42 @@ def build_results_text(
     binary_ok = bool(cobb_binary and cobb_binary.get("success"))
     multi_ok = bool(cobb_multiclass and cobb_multiclass.get("success"))
     curves = cobb_binary.get("curves") if binary_ok else None
+    lang = language  # short alias used in t(...) calls below
 
     lines: list[str] = []
 
     # -------------------------------------------------------------------- COBB
     if curves:
-        lines.append("=== COBB ANGLE - Curvas detectadas ===")
-        labels = ["Curva principal:   ", "Curva secundaria:  "]
+        lines.append(t("cobb_block_header_curves", lang))
         for i, c in enumerate(curves):
-            label = labels[i] if i < len(labels) else f"Curva {i + 1}:         "
+            if i == 0:
+                label = t("principal_label", lang)
+            elif i == 1:
+                label = t("secondary_label", lang)
+            else:
+                label = t("curve_n_label", lang).format(n=i + 1)
             up = c.get("upper_vertebra") or "?"
             lo = c.get("lower_vertebra") or "?"
             direction = c.get("direction", "unknown")
             conv = {
-                "right": "convexidad derecha",
-                "left": "convexidad izquierda",
-                "neutral": "sin convexidad clara",
-            }.get(direction, "direccion desconocida")
+                "right": t("convex_right", lang),
+                "left": t("convex_left", lang),
+                "neutral": t("convex_neutral", lang),
+            }.get(direction, t("convex_unknown", lang))
             lines.append(
                 f"{label} {c['cobb_angle_deg']:5.1f} deg  ({up} - {lo}, {conv})"
             )
     elif binary_ok:
         # Binary succeeded but no curves passed the noise floor (straight spine).
-        lines.append("=== COBB ANGLE ===")
+        lines.append(t("cobb_block_header_simple", lang))
         lines.append(
-            f"Binary method:     {cobb_binary['cobb_angle_deg']:5.1f} deg  "
-            "(no clinically meaningful curves above the noise floor)"
+            f"{t('binary_method', lang)} {cobb_binary['cobb_angle_deg']:5.1f} deg  "
+            f"{t('binary_no_curves', lang)}"
         )
     elif cobb_binary:
-        lines.append("=== COBB ANGLE ===")
+        lines.append(t("cobb_block_header_simple", lang))
         lines.append(
-            f"Binary method:     ERROR - {cobb_binary.get('error', 'unknown')}"
+            f"{t('binary_error', lang)} {cobb_binary.get('error', 'unknown')}"
         )
 
     # ----- Multiclass fallback only (Ciclo 5.7: cross-check block removed) -----
@@ -170,16 +182,16 @@ def build_results_text(
     # the fallback line below, which fires only when the binary method failed
     # entirely — in that case the multiclass is genuinely the best signal.
     if multi_ok and not binary_ok:
-        # Binary failed entirely; multiclass is the only signal available.
         upper = cobb_multiclass.get("upper_end_vertebra", "N/A")
         lower = cobb_multiclass.get("lower_end_vertebra", "N/A")
         lines.append(
-            f"Multiclass method (fallback): {cobb_multiclass['cobb_angle_deg']:5.1f} deg  "
+            f"{t('multi_fallback_prefix', lang)} "
+            f"{cobb_multiclass['cobb_angle_deg']:5.1f} deg  "
             f"(Upper={upper}, Lower={lower})"
         )
     elif cobb_multiclass and not multi_ok:
         lines.append(
-            f"Multiclass method: ERROR - {cobb_multiclass.get('error', 'unknown')}"
+            f"{t('multi_error_prefix', lang)} {cobb_multiclass.get('error', 'unknown')}"
         )
 
     # ---------------------------------------------------------------- COVERAGE
@@ -198,35 +210,33 @@ def build_results_text(
         n_v = coverage_info.get("n_vertebrae", 0)
         n_exp = coverage_info.get("n_expected", 22)
         ratio_pct = (coverage_info.get("coverage_ratio") or 0.0) * 100.0
-        lines.append("\n=== COVERAGE ===")
+        lines.append("\n" + t("coverage_header", lang))
         if upper_v and lower_v:
             lines.append(
-                f"Binary mask covers: {upper_v} - {lower_v}  "
-                f"({n_v} of ~{n_exp} vertebrae, ~{ratio_pct:.0f}%)"
+                f"{t('coverage_covers', lang)} {upper_v} - {lower_v}  "
+                f"({n_v} {t('coverage_of', lang)} ~{n_exp} "
+                f"{t('coverage_vertebrae_word', lang)}, ~{ratio_pct:.0f}%)"
             )
         else:
             lines.append(
-                f"Binary mask covers ~{ratio_pct:.0f}% of image height "
-                "(no multiclass vertebrae to name the range)"
+                t("coverage_no_names", lang).format(pct=f"{ratio_pct:.0f}")
             )
         below = coverage_info.get("vertebrae_below_range") or []
         above = coverage_info.get("vertebrae_above_range") or []
         if below:
             rng = f"{below[0]}-{below[-1]}" if len(below) > 1 else below[0]
             lines.append(
-                f"WARNING: Lower spine ({rng}) NOT segmented — "
-                "Cobb angle may be misleading."
+                f"{t('warning_lower_spine_prefix', lang)} ({rng}) "
+                f"{t('warning_not_segmented_suffix', lang)}"
             )
         elif above:
             rng = f"{above[0]}-{above[-1]}" if len(above) > 1 else above[0]
             lines.append(
-                f"WARNING: Upper spine ({rng}) NOT segmented — "
-                "Cobb angle may be misleading."
+                f"{t('warning_upper_spine_prefix', lang)} ({rng}) "
+                f"{t('warning_not_segmented_suffix', lang)}"
             )
         else:
-            lines.append(
-                "WARNING: Partial spine coverage — Cobb angle may be misleading."
-            )
+            lines.append(t("warning_partial_generic", lang))
 
     # ----------------------------------------------------- ROTATION WARNING
     # Ciclo 5.4 fix G: when the spine skeleton's principal axis deviates more
@@ -243,63 +253,62 @@ def build_results_text(
     if is_tilted:
         tilt_abs = orientation_info.get("tilt_abs_deg", 0.0)
         threshold = orientation_info.get("threshold_deg", 12.0)
-        lines.append("\n=== ROTATION WARNING ===")
+        lines.append("\n" + t("rotation_header", lang))
         lines.append(
-            f"Image appears tilted {tilt_abs:.1f} deg from vertical "
-            f"(threshold {threshold:.0f} deg)."
+            t("rotation_line_1", lang).format(tilt=tilt_abs, threshold=threshold)
         )
-        lines.append(
-            "The binary Cobb method fits x = f(y) and may report rotation "
-            "as scoliosis."
-        )
-        lines.append(
-            "Re-capture with the patient straight, or trust the multiclass "
-            "measurement (per-vertebra, rotation-invariant)."
-        )
+        lines.append(t("rotation_line_2", lang))
+        lines.append(t("rotation_line_3", lang))
 
     # -------------------------------------------------------------- ASSESSMENT
     # Severity uses the LARGEST curve detected by the binary method. The
     # binary method is the source of truth on our data (MAE 23 deg, r=0.66,
     # vs multiclass MAE 26-45 deg with negative correlation in the worst case).
-    assessment_source = None
+    assessment_source_key = None  # which header to use
+    angle = None
     if curves:
-        assessment_source = ("Binary principal", curves[0]["cobb_angle_deg"])
+        assessment_source_key = "assessment_header_principal"
+        angle = curves[0]["cobb_angle_deg"]
     elif binary_ok:
-        assessment_source = ("Binary", cobb_binary["cobb_angle_deg"])
+        assessment_source_key = "assessment_header_binary"
+        angle = cobb_binary["cobb_angle_deg"]
     elif multi_ok:
-        assessment_source = ("Multiclass fallback", cobb_multiclass["cobb_angle_deg"])
+        assessment_source_key = "assessment_header_fallback"
+        angle = cobb_multiclass["cobb_angle_deg"]
 
-    if assessment_source is not None:
-        source_label, angle = assessment_source
+    if assessment_source_key is not None:
         # Ciclo 5.3 fix F: if coverage is partial AND the angle is ~0, the
         # binary likely missed enough spine that "Normal" would be misleading.
         # Flag it as inconclusive so the user knows to investigate instead.
         if coverage_is_partial and angle < 1.0:
-            assessment = (
-                "Inconclusive - insufficient binary coverage to compute Cobb. "
-                "Review segmentation before interpreting."
-            )
+            assessment = t("assessment_inconclusive", lang)
         elif angle < 10:
-            assessment = "Normal (< 10 degrees)"
+            assessment = t("assessment_normal", lang)
         elif angle < 25:
-            assessment = "Mild scoliosis (10-25 degrees)"
+            assessment = t("assessment_mild", lang)
         elif angle < 40:
-            assessment = "Moderate scoliosis (25-40 degrees)"
+            assessment = t("assessment_moderate", lang)
         else:
-            assessment = "Severe scoliosis (> 40 degrees)"
-        lines.append(f"\n=== ASSESSMENT (based on {source_label}) ===")
+            assessment = t("assessment_severe", lang)
+        lines.append("\n" + t(assessment_source_key, lang))
         lines.append(assessment)
 
         if curves and len(curves) > 1:
+            n = len(curves)
             shape = {
-                2: "doble curva (S-shape)",
-                3: "triple curva",
-            }.get(len(curves), f"{len(curves)} curvas")
-            lines.append(f"Numero total de curvas detectadas: {len(curves)} ({shape})")
+                2: t("shape_double", lang),
+                3: t("shape_triple", lang),
+            }.get(n, t("shape_n_curves", lang).format(n=n))
+            lines.append(
+                f"{t('curves_total_prefix', lang)} {n} ({shape})"
+            )
 
     # ---------------------------------------------------- Vertebrae list
     if vertebrae_detected:
-        lines.append(f"\n=== VERTEBRAE DETECTED ({len(vertebrae_detected)}) ===")
+        lines.append(
+            f"\n{t('vertebrae_header_prefix', lang)} "
+            f"({len(vertebrae_detected)}) ==="
+        )
         lines.append(", ".join(vertebrae_detected))
 
     return "\n".join(lines)
@@ -340,22 +349,24 @@ def create_app(
             multiclass_model_name=multiclass_model_name,
         )
 
-    def predict(input_image):
+    def predict(input_image, language_label="Español"):
         """Process the (already-rotated) radiograph shown in the UI.
 
-        Ciclo 5.6: the rotation is now applied LIVE in the UI via the
-        slider + 5 quick buttons. By the time the user clicks Analyze,
-        `input_image` is the displayed (already-rotated) image, so
-        predict() no longer needs a `rotation_deg` argument — it just
-        delegates to the pipeline. The ROTATION WARNING from Ciclo 5.4
-        still fires if the SVD sees residual tilt > 12 deg post-rotation
-        ("you rotated, but it's still tilted").
+        Ciclo 5.6: the rotation is applied LIVE in the UI via the slider
+        + 5 quick buttons. By the time the user clicks Analyze, the
+        displayed `input_image` is already rotated, so predict() just
+        delegates to the pipeline.
+
+        Ciclo 5.7: `language_label` carries the user's selection from
+        the EN/ES radio ("Español" or "English"); we resolve it to a
+        lang code and pass it to build_results_text.
         """
+        lang = label_to_lang(language_label)
         if input_image is None:
-            return None, None, None, None, "Please upload a radiograph image."
+            return None, None, None, None, t("no_image", lang)
 
         if pipeline is None:
-            return None, None, None, None, "No model loaded. Please provide checkpoint paths."
+            return None, None, None, None, t("no_model", lang)
 
         # Convert to RGB if needed
         if input_image.ndim == 2:
@@ -377,6 +388,7 @@ def create_app(
             vertebrae_detected=results.get("vertebrae_detected"),
             coverage_info=results.get("coverage_info"),
             orientation_info=results.get("orientation_info"),
+            language=lang,
         )
 
         # Generate explainability panel
@@ -429,18 +441,19 @@ def create_app(
         title="Spine Segmentation for Scoliosis Diagnosis",
         theme=gr.themes.Soft(),
     ) as app:
-        gr.Markdown(
-            """
-            # Spine Segmentation for Scoliosis Diagnosis
-            ### Automatic vertebral segmentation and Cobb angle measurement from X-ray radiographs
-
-            Upload a spinal X-ray radiograph to get:
-            - **Binary segmentation** of the spinal column
-            - **Multiclass segmentation** of individual vertebrae
-            - **Automated Cobb angle** measurement using two methods
-            - **Explainability** — Grad-CAM and confidence maps (why the model decided)
-            """
+        # Ciclo 5.7: language radio drives both the header markdown and the
+        # diagnosis text. Default = Español (project audience: U. Andes,
+        # Colombia). The bilingual label ("Idioma / Language") makes the
+        # toggle discoverable for English speakers landing on the page.
+        language_radio = gr.Radio(
+            choices=["Español", "English"],
+            value="Español",
+            label="Idioma / Language",
+            interactive=True,
         )
+        # The Markdown header is a tracked component so language_radio.change
+        # can rewrite its content with the translated intro.
+        header_md = gr.Markdown(header_markdown(DEFAULT_LANG))
 
         with gr.Row():
             with gr.Column(scale=1):
@@ -567,8 +580,20 @@ def create_app(
 
         predict_btn.click(
             fn=predict,
-            inputs=[input_image],  # already-rotated by the preview pipeline
+            # input_image is already-rotated by the preview pipeline;
+            # language_radio is the EN/ES selector for the diagnosis report.
+            inputs=[input_image, language_radio],
             outputs=[binary_output, multi_output, cobb_output, explain_output, results_text],
+        )
+
+        # Ciclo 5.7: language toggle updates the header markdown live. The
+        # diagnosis report itself is updated the next time the user presses
+        # Analyze — re-running the model just to retranslate fixed text would
+        # be wasteful (10s for ~200 bytes of string difference).
+        language_radio.change(
+            fn=lambda lbl: header_markdown(label_to_lang(lbl)),
+            inputs=[language_radio],
+            outputs=[header_md],
         )
 
         gr.Markdown(

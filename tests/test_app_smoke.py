@@ -59,7 +59,8 @@ def test_build_results_text_uses_binary_for_assessment():
     """When both methods succeed, the Assessment severity must come from the
     binary Cobb (more robust on our data: MAE 23 deg vs 26-45 deg multiclass).
     Pinning this regression-prevents the old behavior where Assessment came
-    from the noisy multiclass and false-labelled scoliosis cases as Normal."""
+    from the noisy multiclass and false-labelled scoliosis cases as Normal.
+    Ciclo 5.7: force language='en' so the assertions match English strings."""
     from spine_segmentation.deployment.app import build_results_text
 
     text = build_results_text(
@@ -68,6 +69,7 @@ def test_build_results_text_uses_binary_for_assessment():
             "success": True, "cobb_angle_deg": 5.0,
             "upper_end_vertebra": "T6", "lower_end_vertebra": "T12",
         },
+        language="en",
     )
 
     assert "ASSESSMENT (based on Binary)" in text
@@ -86,10 +88,13 @@ def test_build_results_text_no_longer_emits_cross_check_block():
     from spine_segmentation.deployment.app import build_results_text
 
     # Case where 5.2-5.6 would have shown CONCORDANCIA: both methods succeed.
+    # Force language='en' so we can assert exact English strings; the i18n
+    # path is exercised by the dedicated EN/ES tests above.
     text_high = build_results_text(
         cobb_binary={"success": True, "cobb_angle_deg": 20.0},
         cobb_multiclass={"success": True, "cobb_angle_deg": 21.5,
                          "upper_end_vertebra": "T5", "lower_end_vertebra": "T11"},
+        language="en",
     )
     assert "CONCORDANCIA" not in text_high
     assert "CROSS-CHECK" not in text_high
@@ -103,6 +108,7 @@ def test_build_results_text_no_longer_emits_cross_check_block():
         cobb_binary={"success": True, "cobb_angle_deg": 10.0},
         cobb_multiclass={"success": True, "cobb_angle_deg": 35.0,
                          "upper_end_vertebra": "T5", "lower_end_vertebra": "T11"},
+        language="en",
     )
     assert "CONCORDANCIA" not in text_disc
     assert "Significant discrepancy" not in text_disc
@@ -118,6 +124,7 @@ def test_build_results_text_falls_back_to_multiclass_when_binary_fails():
         cobb_binary={"success": False, "error": "Empty mask after cleaning"},
         cobb_multiclass={"success": True, "cobb_angle_deg": 28.0,
                          "upper_end_vertebra": "T6", "lower_end_vertebra": "L1"},
+        language="en",
     )
 
     assert "ASSESSMENT (based on Multiclass fallback)" in text
@@ -251,6 +258,112 @@ def test_binary_overlay_renders_spline_and_inflection_points():
 
 
 # ----------------------------------------------------------------------------
+# i18n module + ES/EN toggle — Ciclo 5.7 (fix N)
+# ----------------------------------------------------------------------------
+
+def test_t_returns_spanish_by_default():
+    """The Spanish strings are the default — calling t(key) without a lang
+    must return the ES variant."""
+    from spine_segmentation.deployment.i18n import t
+    assert "Curva principal" in t("principal_label")
+    assert "convexidad derecha" in t("convex_right")
+
+
+def test_t_returns_english_when_lang_is_en():
+    """Passing lang='en' must return the English string for the same key."""
+    from spine_segmentation.deployment.i18n import t
+    assert "Principal curve" in t("principal_label", "en")
+    assert "convex right" in t("convex_right", "en")
+
+
+def test_t_falls_back_to_key_when_key_missing():
+    """A missing key returns the key itself — visible placeholder so the
+    developer notices the gap during testing instead of failing silently."""
+    from spine_segmentation.deployment.i18n import t
+    assert t("nonexistent_key_xyz") == "nonexistent_key_xyz"
+    assert t("nonexistent_key_xyz", "en") == "nonexistent_key_xyz"
+
+
+def test_t_falls_back_to_spanish_when_lang_unknown():
+    """If the user passes an unsupported lang, fall back to Spanish (default)
+    instead of crashing — defensive behaviour against UI bugs."""
+    from spine_segmentation.deployment.i18n import t
+    assert "Curva principal" in t("principal_label", "fr")  # French not supported
+
+
+def test_label_to_lang_maps_radio_choices():
+    """The Gradio radio shows 'Español' / 'English'; the predict closure
+    converts those labels back to short lang codes used everywhere else."""
+    from spine_segmentation.deployment.i18n import label_to_lang
+    assert label_to_lang("Español") == "es"
+    assert label_to_lang("English") == "en"
+    # Unknown labels fall back to ES (default).
+    assert label_to_lang("Klingon") == "es"
+
+
+def test_build_results_text_renders_in_spanish():
+    """When language='es' (or default), the diagnosis text contains Spanish
+    UI strings — Curva principal, convexidad, Escoliosis leve, etc."""
+    from spine_segmentation.deployment.app import build_results_text
+
+    text = build_results_text(
+        cobb_binary={
+            "success": True, "cobb_angle_deg": 18.0,
+            "curves": [{
+                "cobb_angle_deg": 18.0,
+                "upper_vertebra": "T5", "lower_vertebra": "T12",
+                "direction": "right", "rank": 1,
+            }],
+        },
+        cobb_multiclass=None,
+        language="es",
+    )
+    assert "Curva principal" in text
+    assert "convexidad derecha" in text
+    assert "Escoliosis leve" in text
+    assert "EVALUACION" in text
+    # English strings must NOT leak through.
+    assert "Principal curve" not in text
+    assert "Mild scoliosis" not in text
+
+
+def test_build_results_text_renders_in_english():
+    """When language='en', everything is in English."""
+    from spine_segmentation.deployment.app import build_results_text
+
+    text = build_results_text(
+        cobb_binary={
+            "success": True, "cobb_angle_deg": 18.0,
+            "curves": [{
+                "cobb_angle_deg": 18.0,
+                "upper_vertebra": "T5", "lower_vertebra": "T12",
+                "direction": "right", "rank": 1,
+            }],
+        },
+        cobb_multiclass=None,
+        language="en",
+    )
+    assert "Principal curve" in text
+    assert "convex right" in text
+    assert "Mild scoliosis" in text
+    assert "ASSESSMENT" in text
+    # Spanish strings must NOT leak through.
+    assert "Curva principal" not in text
+    assert "Escoliosis leve" not in text
+
+
+def test_header_markdown_has_both_languages():
+    """The Markdown intro must exist in both languages and differ — sanity
+    that the toggle has something meaningful to switch to."""
+    from spine_segmentation.deployment.i18n import header_markdown
+    es = header_markdown("es")
+    en = header_markdown("en")
+    assert "Segmentacion Espinal" in es or "Diagnostico" in es
+    assert "Spine Segmentation" in en or "Diagnosis" in en
+    assert es != en
+
+
+# ----------------------------------------------------------------------------
 # Live rotation preview — Ciclo 5.6 (fix L)
 # ----------------------------------------------------------------------------
 
@@ -281,17 +394,14 @@ def test_preview_rotation_for_display_returns_rotated():
 
 
 def test_predict_callback_no_longer_takes_rotation_deg():
-    """Regression pin for the Ciclo 5.6 simplification: the predict()
-    closure inside create_app must take a single positional argument
-    (input_image). Live preview means the displayed image is already
-    rotated by the time Analyze fires — passing rotation_deg here would
-    cause double-rotation."""
+    """Regression pin: predict() closure must NOT have a `rotation_deg`
+    parameter (Ciclo 5.6 simplification — live preview means the displayed
+    image is already rotated by the time Analyze fires). Ciclo 5.7 added
+    a language_label parameter, so the expected arg count is 2."""
     import inspect
     from spine_segmentation.deployment.app import create_app
 
     app = create_app(binary_checkpoint=None, multiclass_checkpoint=None)
-    # Walk the Blocks tree and find the predict handler attached to the
-    # Analyze button. Easier path: grep for the closure by name.
     found_predict = None
     for fn_def in getattr(app, "fns", {}).values() if hasattr(app, "fns") else []:
         fn = getattr(fn_def, "fn", None)
@@ -300,15 +410,11 @@ def test_predict_callback_no_longer_takes_rotation_deg():
         if getattr(fn, "__name__", "") == "predict":
             found_predict = fn
             break
-    # Some Gradio versions store handlers differently. Fall back to a
-    # structural check: the input_image -> predict_btn click should be 1-input.
     if found_predict is not None:
         sig = inspect.signature(found_predict)
-        params = list(sig.parameters.values())
-        # Single positional arg, no `rotation_deg`.
-        assert len(params) == 1, f"predict has {len(params)} params, expected 1"
+        # Two params: input_image + language_label. NO rotation_deg.
         assert "rotation_deg" not in sig.parameters
-    # Either way we verify the helper used by the UI is in place.
+        assert "input_image" in sig.parameters
     from spine_segmentation.deployment.app import preview_rotation_for_display
     assert callable(preview_rotation_for_display)
 
@@ -425,7 +531,7 @@ def test_build_results_text_emits_rotation_warning_when_tilted():
     block is absent."""
     from spine_segmentation.deployment.app import build_results_text
 
-    # Tilted -> block visible
+    # Tilted -> block visible (force language='en' for stable English assertions)
     text_tilted = build_results_text(
         cobb_binary={"success": True, "cobb_angle_deg": 31.8,
                      "curves": [{"cobb_angle_deg": 31.8, "upper_vertebra": "L3",
@@ -435,11 +541,13 @@ def test_build_results_text_emits_rotation_warning_when_tilted():
                          "upper_end_vertebra": "C5", "lower_end_vertebra": "L4"},
         orientation_info={"success": True, "tilt_deg": 18.4, "tilt_abs_deg": 18.4,
                           "is_tilted": True, "threshold_deg": 12.0, "n_points": 200},
+        language="en",
     )
     assert "=== ROTATION WARNING ===" in text_tilted
     assert "18.4 deg" in text_tilted
     assert "threshold 12 deg" in text_tilted
-    assert "multiclass" in text_tilted
+    # Ciclo 5.7: copy advises using the rotation slider (not "trust multi").
+    assert "rotation slider" in text_tilted.lower() or "binary" in text_tilted.lower()
 
     # Not tilted -> no block
     text_ok = build_results_text(
@@ -447,6 +555,7 @@ def test_build_results_text_emits_rotation_warning_when_tilted():
         cobb_multiclass=None,
         orientation_info={"success": True, "tilt_deg": 2.0, "tilt_abs_deg": 2.0,
                           "is_tilted": False, "threshold_deg": 12.0, "n_points": 200},
+        language="en",
     )
     assert "ROTATION WARNING" not in text_ok
 
@@ -454,6 +563,7 @@ def test_build_results_text_emits_rotation_warning_when_tilted():
     text_none = build_results_text(
         cobb_binary={"success": True, "cobb_angle_deg": 5.0},
         cobb_multiclass=None,
+        language="en",
     )
     assert "ROTATION WARNING" not in text_none
 
@@ -800,6 +910,7 @@ def test_build_results_text_multi_curve_layout():
             "success": True, "cobb_angle_deg": 28.0,
             "upper_end_vertebra": "T6", "lower_end_vertebra": "L1",
         },
+        language="es",
     )
 
     assert "Curva principal" in text
@@ -811,8 +922,9 @@ def test_build_results_text_multi_curve_layout():
     # S-curve descriptor and curve count.
     assert "S-shape" in text or "S-curve" in text or "doble curva" in text
     assert "Numero total de curvas detectadas: 2" in text
-    # Assessment is based on the principal angle (32 -> Moderate).
-    assert "Moderate" in text
+    # Assessment is based on the principal angle (32 -> "moderada" in ES,
+    # the Spanish severity string is "Escoliosis moderada (25-40 grados)").
+    assert "moderada" in text.lower() or "moderate" in text.lower()
     assert "Binary principal" in text
 
 
@@ -928,6 +1040,7 @@ def test_build_results_text_emits_coverage_warning_when_partial():
             "upper_vertebra": "C6",
             "lower_vertebra": "T10",
         },
+        language="en",  # exact English string assertions
     )
 
     assert "=== COVERAGE ===" in text
@@ -986,6 +1099,7 @@ def test_build_results_text_says_inconclusive_when_zero_cobb_and_partial():
             "upper_vertebra": "C6",
             "lower_vertebra": "T2",
         },
+        language="en",  # English-string assertions
     )
 
     assert "Inconclusive" in text
