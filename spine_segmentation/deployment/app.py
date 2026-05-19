@@ -162,32 +162,14 @@ def build_results_text(
             f"Binary method:     ERROR - {cobb_binary.get('error', 'unknown')}"
         )
 
-    # ------------------------------------------------ Cross-check vs multiclass
-    if binary_ok and multi_ok:
-        # Compare the binary principal angle (curves[0] when multi-curve detection
-        # ran, else the back-compat single cobb_angle_deg) against the multiclass.
-        binary_principal = (
-            curves[0]["cobb_angle_deg"] if curves
-            else cobb_binary["cobb_angle_deg"]
-        )
-        multi_deg = cobb_multiclass["cobb_angle_deg"]
-        diff = abs(binary_principal - multi_deg)
-        if diff <= 5.0:
-            concordance = "High agreement - both methods coincide"
-        elif diff <= 15.0:
-            concordance = "Review recommended - methods differ slightly"
-        else:
-            concordance = "Significant discrepancy - specialist judgment required"
-        upper = cobb_multiclass.get("upper_end_vertebra", "N/A")
-        lower = cobb_multiclass.get("lower_end_vertebra", "N/A")
-        lines.append("\n=== CROSS-CHECK binary vs multiclass ===")
-        lines.append(f"    Binary principal:    {binary_principal:5.1f} deg")
-        lines.append(
-            f"    Multiclass:          {multi_deg:5.1f} deg  "
-            f"(Upper={upper}, Lower={lower}; illustration / anatomical reference only)"
-        )
-        lines.append(f"    CONCORDANCIA: {concordance}  (diff = {diff:.1f} deg)")
-    elif multi_ok and not binary_ok:
+    # ----- Multiclass fallback only (Ciclo 5.7: cross-check block removed) -----
+    # The CROSS-CHECK binary vs multiclass block confused users (binary 4 deg vs
+    # multi 90 deg looks like a contradiction without context), and Elvis asked
+    # to keep the multiclass strictly as a backstage helper for label transfer
+    # and green-box drawing. The ONLY user-visible multiclass output left is
+    # the fallback line below, which fires only when the binary method failed
+    # entirely — in that case the multiclass is genuinely the best signal.
+    if multi_ok and not binary_ok:
         # Binary failed entirely; multiclass is the only signal available.
         upper = cobb_multiclass.get("upper_end_vertebra", "N/A")
         lower = cobb_multiclass.get("lower_end_vertebra", "N/A")

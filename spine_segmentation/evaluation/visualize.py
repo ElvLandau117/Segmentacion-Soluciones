@@ -600,15 +600,12 @@ def draw_cobb_angle_visualization(
                 (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 100, 200), 2,
                 lineType=cv2.LINE_AA,
             )
-        # Optional third line for the multiclass cross-check.
-        if cobb_multiclass_result and cobb_multiclass_result.get("success"):
-            multi_deg = float(cobb_multiclass_result["cobb_angle_deg"])
-            cv2.putText(
-                vis,
-                f"Multiclass (illustration only): {multi_deg:.1f} deg",
-                (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1,
-                lineType=cv2.LINE_AA,
-            )
+        # Ciclo 5.7: the optional 3rd cyan header line "Multiclass
+        # (illustration only): X.X deg" was removed. It cluttered the figure
+        # and showed a number that, taken at face value, looked contradictory
+        # to the binary Cobb (e.g., binary 4 deg + multi 90 deg on the same
+        # case). The multiclass mask is still used silently for label
+        # transfer (Tn-Lm names on the green boxes).
 
         # If we couldn't render ANY curve (vertebra names missing), at least show text.
         if not drawn_any:

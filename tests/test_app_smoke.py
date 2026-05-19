@@ -77,29 +77,35 @@ def test_build_results_text_uses_binary_for_assessment():
     assert "Normal" not in text
 
 
-def test_build_results_text_includes_concordance_when_both_succeed():
-    """When both methods produce a Cobb, the CONCORDANCIA cross-check block must
-    appear with the correct label for the difference range (Ciclo 5.2: header
-    renamed CONCORDANCE -> CONCORDANCIA to match the multi-curve UI in Spanish)."""
+def test_build_results_text_no_longer_emits_cross_check_block():
+    """Ciclo 5.7 regression pin: when both binary and multiclass succeed, the
+    diagnosis text must NOT contain the old CROSS-CHECK / CONCORDANCIA block.
+    Elvis asked to remove it — the multiclass cobb (often 90 deg degenerate
+    on our data) looked contradictory next to the binary cobb and confused
+    users. Multiclass is now strictly a backstage helper for label transfer."""
     from spine_segmentation.deployment.app import build_results_text
 
-    # diff = 1.5 -> High agreement
+    # Case where 5.2-5.6 would have shown CONCORDANCIA: both methods succeed.
     text_high = build_results_text(
         cobb_binary={"success": True, "cobb_angle_deg": 20.0},
         cobb_multiclass={"success": True, "cobb_angle_deg": 21.5,
                          "upper_end_vertebra": "T5", "lower_end_vertebra": "T11"},
     )
-    assert "CONCORDANCIA" in text_high
-    assert "High agreement" in text_high
+    assert "CONCORDANCIA" not in text_high
+    assert "CROSS-CHECK" not in text_high
+    assert "Multiclass:" not in text_high
+    # But the binary Cobb and the assessment still appear.
+    assert "20.0" in text_high or "20" in text_high
+    assert "ASSESSMENT" in text_high
 
-    # diff = 25 -> Significant discrepancy
+    # Significant-discrepancy case: same expectation — no block at all.
     text_disc = build_results_text(
         cobb_binary={"success": True, "cobb_angle_deg": 10.0},
         cobb_multiclass={"success": True, "cobb_angle_deg": 35.0,
                          "upper_end_vertebra": "T5", "lower_end_vertebra": "T11"},
     )
-    assert "CONCORDANCIA" in text_disc
-    assert "Significant discrepancy" in text_disc
+    assert "CONCORDANCIA" not in text_disc
+    assert "Significant discrepancy" not in text_disc
 
 
 def test_build_results_text_falls_back_to_multiclass_when_binary_fails():
