@@ -313,118 +313,45 @@ def _draw_binary_overlay(vis, cobb_binary_result):
         cv2.circle(vis, (int(ix), int(iy)), 5, (0, 0, 0), 1, lineType=cv2.LINE_AA)
 
 
-def draw_cobb_angle_visualization(
-    image: np.ndarray,
+def _draw_single_cobb_curve(
+    vis: np.ndarray,
     multiclass_mask: np.ndarray,
-    cobb_multiclass_result: dict,
-    cobb_binary_result: Optional[dict] = None,
-    scheme: str = "vertebrae_24",
+    upper_v: dict,
+    lower_v: dict,
+    cobb_deg: float,
+    color: tuple,
+    draw_speedometer_if_small: bool = True,
+    label_prefix: str = "",
 ) -> np.ndarray:
-    """Clinical-style Cobb angle figure.
+    """Render ONE Cobb curve on the given image.
 
-    Layout inspired by Fig 1 of Shi et al. 2025 ("Accurate Cobb Angle
-    Estimation via SVD-Based Curve Detection and Vertebral Wedging
-    Quantification", IEEE J-BHI, arXiv:2509.24898):
+    Draws (in this order):
+      1. Green fill over the end-vertebra masks.
+      2. Green bbox outlines.
+      3. Cyan endplate markers (tangent direction, inside the boxes).
+      4. Perpendicular `color` lines from each centroid; if they cross
+         inside the frame, they meet at the intersection and an arc is
+         drawn there with the angle label.
+      5. Optional `_draw_speedometer` if the angle is small (<8 deg) or
+         the intersection falls outside the frame.
 
-      - Green semi-transparent boxes over the upper / lower end vertebrae.
-      - Cyan short markers ALONG each endplate (inside the boxes).
-      - Red PERPENDICULAR lines to the endplates that meet at the Cobb
-        intersection, with an arc drawn at the intersection.
-      - A small "Cobb gauge" in the bottom-left when the angle is too
-        small (<8 deg) for the in-frame arc to be readable.
-
-    Adapted to our pipeline: the end vertebrae come from
-    `cobb_from_multiclass` (segmentation-based, not landmark-based like
-    the paper). We additionally overlay the binary-method internals
-    (fitted spline + 2 inflection points) because our dataset only has
-    segmentation masks; the spline-based binary Cobb is our equivalent
-    of the paper's landmark-based curve detection.
-
-    Args:
-        image: (H, W, 3) RGB radiograph (uint8 or float in [0,1]).
-        multiclass_mask: (H, W) integer class labels (vertebrae_24).
-        cobb_multiclass_result: dict from `cobb_from_multiclass` — must
-            carry `success`, `upper_end_vertebra`, `lower_end_vertebra`,
-            `cobb_angle_deg`.
-        cobb_binary_result: dict from `cobb_from_binary`, optional. When
-            successful, the spline + inflection points are overlaid and
-            the binary angle is shown in the header.
-        scheme: class mapping scheme (default vertebrae_24).
-
-    Returns:
-        (H, W, 3) uint8 image with overlays.
+    Returns the modified `vis` (also mutated in-place; both work).
     """
-    # Lazy imports to avoid circulars at module import time
-    from spine_segmentation.data.class_mapping import get_class_names
-    from spine_segmentation.postprocessing.vertebra_ordering import (
-        compute_endplate_angles,
-        extract_vertebra_info,
-    )
-
-    vis = image.copy()
-    if vis.dtype != np.uint8:
-        vis = (vis * 255).astype(np.uint8) if vis.max() <= 1.0 else vis.astype(np.uint8)
     h, w = vis.shape[:2]
 
-    cobb_binary_deg = None
-    if cobb_binary_result and cobb_binary_result.get("success"):
-        cobb_binary_deg = float(cobb_binary_result["cobb_angle_deg"])
-
-    # If multiclass failed: text-only fallback + binary overlay if we have it.
-    if not cobb_multiclass_result or not cobb_multiclass_result.get("success"):
-        _draw_binary_overlay(vis, cobb_binary_result)
-        if cobb_binary_deg is not None:
-            cv2.putText(
-                vis, f"Cobb (Binary): {cobb_binary_deg:.1f} deg",
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
-            )
-            _draw_speedometer(vis, cobb_binary_deg)
-        cv2.putText(
-            vis, "Multiclass Cobb visualization unavailable",
-            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
-        )
-        return vis
-
-    upper_name = cobb_multiclass_result.get("upper_end_vertebra")
-    lower_name = cobb_multiclass_result.get("lower_end_vertebra")
-    cobb_deg = float(cobb_multiclass_result.get("cobb_angle_deg", 0.0))
-
-    # Re-extract per-vertebra info to access bbox + orientation for drawing.
-    # `cobb_from_multiclass` discards bbox/region in its returned dict.
-    class_names = get_class_names(scheme)
-    vertebrae = extract_vertebra_info(multiclass_mask, class_names)
-    vertebrae = compute_endplate_angles(vertebrae)
-
-    upper_v = next((v for v in vertebrae if v["name"] == upper_name), None)
-    lower_v = next((v for v in vertebrae if v["name"] == lower_name), None)
-
-    if upper_v is None or lower_v is None:
-        cv2.putText(
-            vis, f"Cobb (Multiclass): {cobb_deg:.1f} deg",
-            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
-        )
-        if cobb_binary_deg is not None:
-            cv2.putText(
-                vis, f"Cobb (Binary): {cobb_binary_deg:.1f} deg",
-                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
-            )
-        _draw_binary_overlay(vis, cobb_binary_result)
-        return vis
-
-    # 1) Green semi-transparent fill over the two end vertebrae masks.
+    # 1) Green fill over end-vertebra masks.
     color_mask = np.zeros_like(vis)
     for v in (upper_v, lower_v):
         region = (multiclass_mask == v["class_id"]).astype(np.uint8)
         color_mask[region > 0] = [0, 200, 0]
-    vis = cv2.addWeighted(vis, 1.0, color_mask, 0.45, 0)
+    vis[:] = cv2.addWeighted(vis, 1.0, color_mask, 0.45, 0)
 
     # 2) Bbox outlines.
     for v in (upper_v, lower_v):
         min_row, min_col, max_row, max_col = v["bbox"]
         cv2.rectangle(vis, (min_col, min_row), (max_col, max_row), (0, 220, 0), 2)
 
-    # 3) Endplate markers (cyan) along the endplate, inside each box.
-    # 4) Collect perpendicular vectors for the angle calculation.
+    # 3) Endplate markers + 4) collect perpendicular vectors.
     perp_vecs = []
     centroids = []
     for v in (upper_v, lower_v):
@@ -449,15 +376,14 @@ def draw_cobb_angle_visualization(
         and 0 <= intersection[1] < h
     )
 
-    # 6) Perpendicular red lines: from each centroid to the intersection if in-frame,
-    # otherwise a fixed-length ray oriented toward the other centroid.
+    # 6) Perpendicular lines (the `color` is what differentiates principal vs secondary).
     if intersection_in_frame:
         for cen in centroids:
             cv2.line(
                 vis,
                 (int(round(cen[0])), int(round(cen[1]))),
                 (int(round(intersection[0])), int(round(intersection[1]))),
-                (255, 0, 0), 2, lineType=cv2.LINE_AA,
+                color, 2, lineType=cv2.LINE_AA,
             )
     else:
         fixed_len = 180.0
@@ -471,20 +397,227 @@ def draw_cobb_angle_visualization(
                 vis,
                 (int(round(cen[0])), int(round(cen[1]))),
                 p2,
-                (255, 0, 0), 2, lineType=cv2.LINE_AA,
+                color, 2, lineType=cv2.LINE_AA,
             )
 
-    # 7) Arc at the intersection (skip when angle is too small to be readable).
+    # 7) Arc at intersection.
     if intersection_in_frame and cobb_deg > 1.0:
         radius = float(np.clip(30.0 + cobb_deg * 1.5, 35.0, 90.0))
         _draw_angle_arc(vis, intersection, perp_vecs[0], perp_vecs[1],
-                        radius, cobb_deg, (255, 0, 0))
+                        radius, cobb_deg, color)
 
-    # 8) Speedometer fallback for tiny angles or out-of-frame intersections.
-    if cobb_deg < 8.0 or not intersection_in_frame:
+    # 8) Speedometer fallback.
+    if draw_speedometer_if_small and (cobb_deg < 8.0 or not intersection_in_frame):
         _draw_speedometer(vis, cobb_deg)
 
-    # 9) Headers (both Cobb readings).
+    # 9) End-vertebra labels (small, beside the bbox; prefixed when multi-curve).
+    for v, role in ((upper_v, "Superior"), (lower_v, "Inferior")):
+        min_row, min_col, max_row, max_col = v["bbox"]
+        text_x = min(max_col + 5, w - 220)
+        text_y = max(20, (min_row + max_row) // 2)
+        cv2.putText(
+            vis,
+            f"{label_prefix}{role} ({v['name']})",
+            (text_x, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1,
+            lineType=cv2.LINE_AA,
+        )
+
+    return vis
+
+
+def draw_cobb_angle_visualization(
+    image: np.ndarray,
+    multiclass_mask: np.ndarray,
+    cobb_multiclass_result: dict,
+    cobb_binary_result: Optional[dict] = None,
+    scheme: str = "vertebrae_24",
+) -> np.ndarray:
+    """Clinical-style Cobb angle figure with multi-curve support (Ciclo 5.2).
+
+    Layout inspired by Fig 1 of Shi et al. 2025 ("Accurate Cobb Angle
+    Estimation via SVD-Based Curve Detection and Vertebral Wedging
+    Quantification", IEEE J-BHI, arXiv:2509.24898):
+
+      - For each detected curve (up to the top 2 by magnitude): green
+        boxes on the upper/lower end vertebrae, cyan endplate markers,
+        perpendicular lines that meet at the Cobb intersection with an
+        arc drawn there. Principal curve is RED; secondary is MAGENTA.
+      - Mini "Cobb gauge" bottom-left for the principal when its angle
+        is too small to read on-image.
+      - Binary spline + all inflection points overlay (white spline,
+        yellow dots) on top, so the user sees where the curves come from.
+
+    Multi-curve detection happens UPSTREAM in `cobb_from_binary`
+    (Ciclo 5.2). When `cobb_binary_result["curves"]` is non-empty, this
+    function uses it. Vertebra names attached by
+    `assign_vertebra_names_to_curves` localise the boxes. When `curves`
+    is missing, the function falls back to the Ciclo 5.1 single-curve
+    layout driven by `cobb_multiclass_result.upper/lower_end_vertebra`.
+
+    Adapted to our pipeline: the curves come from segmentation-based
+    inflection points (not landmark heatmaps like the paper). The
+    multiclass mask is used only for NAMING vertebrae and rendering the
+    green fills, never for the Cobb angle itself.
+
+    Args:
+        image: (H, W, 3) RGB radiograph.
+        multiclass_mask: (H, W) integer class labels (vertebrae_24).
+        cobb_multiclass_result: dict from `cobb_from_multiclass`.
+        cobb_binary_result: dict from `cobb_from_binary`, optional.
+        scheme: class mapping scheme.
+
+    Returns:
+        (H, W, 3) uint8 image with overlays.
+    """
+    # Lazy imports to avoid circulars at module import time
+    from spine_segmentation.data.class_mapping import get_class_names
+    from spine_segmentation.postprocessing.vertebra_ordering import (
+        compute_endplate_angles,
+        extract_vertebra_info,
+    )
+
+    vis = image.copy()
+    if vis.dtype != np.uint8:
+        vis = (vis * 255).astype(np.uint8) if vis.max() <= 1.0 else vis.astype(np.uint8)
+    h, w = vis.shape[:2]
+
+    cobb_binary_deg = None
+    if cobb_binary_result and cobb_binary_result.get("success"):
+        cobb_binary_deg = float(cobb_binary_result["cobb_angle_deg"])
+    curves = (
+        cobb_binary_result.get("curves", []) if cobb_binary_result else []
+    )
+
+    # Always extract per-vertebra info up front so we can look up bboxes
+    # by name. Empty mask -> empty list, which the rest of the function tolerates.
+    class_names = get_class_names(scheme)
+    vertebrae = extract_vertebra_info(multiclass_mask, class_names) if multiclass_mask is not None else []
+    vertebrae = compute_endplate_angles(vertebrae) if vertebrae else []
+    vert_by_name = {v["name"]: v for v in vertebrae}
+
+    # ------------------------------------------------------------ MULTI-CURVE
+    # New path (Ciclo 5.2): draw up to 2 curves from cobb_binary_result.curves.
+    if curves:
+        curve_colors = [
+            (255, 0, 0),       # red — principal
+            (255, 100, 200),   # magenta — secondary
+        ]
+        drawn_any = False
+        for i, curve in enumerate(curves[:2]):
+            upper_name = curve.get("upper_vertebra")
+            lower_name = curve.get("lower_vertebra")
+            upper_v = vert_by_name.get(upper_name)
+            lower_v = vert_by_name.get(lower_name)
+            if upper_v is None or lower_v is None:
+                continue  # Skip curves whose vertebrae we couldn't locate
+            color = curve_colors[i] if i < len(curve_colors) else (200, 200, 0)
+            prefix = "[Principal] " if i == 0 else "[Secundaria] "
+            _draw_single_cobb_curve(
+                vis=vis,
+                multiclass_mask=multiclass_mask,
+                upper_v=upper_v,
+                lower_v=lower_v,
+                cobb_deg=float(curve["cobb_angle_deg"]),
+                color=color,
+                draw_speedometer_if_small=(i == 0),  # only for principal
+                label_prefix=prefix,
+            )
+            drawn_any = True
+
+        # Header — list the angles of the top 2 with matching colors.
+        principal_deg = float(curves[0]["cobb_angle_deg"])
+        cv2.putText(
+            vis,
+            f"Cobb principal: {principal_deg:.1f} deg  "
+            f"({curves[0].get('upper_vertebra') or '?'} - "
+            f"{curves[0].get('lower_vertebra') or '?'}, "
+            f"convex {curves[0].get('direction', '?')})",
+            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2,
+            lineType=cv2.LINE_AA,
+        )
+        if len(curves) > 1:
+            secondary_deg = float(curves[1]["cobb_angle_deg"])
+            cv2.putText(
+                vis,
+                f"Cobb secundaria: {secondary_deg:.1f} deg  "
+                f"({curves[1].get('upper_vertebra') or '?'} - "
+                f"{curves[1].get('lower_vertebra') or '?'}, "
+                f"convex {curves[1].get('direction', '?')})",
+                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 100, 200), 2,
+                lineType=cv2.LINE_AA,
+            )
+        # Optional third line for the multiclass cross-check.
+        if cobb_multiclass_result and cobb_multiclass_result.get("success"):
+            multi_deg = float(cobb_multiclass_result["cobb_angle_deg"])
+            cv2.putText(
+                vis,
+                f"Multiclass (illustration only): {multi_deg:.1f} deg",
+                (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1,
+                lineType=cv2.LINE_AA,
+            )
+
+        # If we couldn't render ANY curve (vertebra names missing), at least show text.
+        if not drawn_any:
+            cv2.putText(
+                vis, "Curves detected but vertebra names not available",
+                (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+            )
+
+        # Binary overlay LAST so spline + IPs sit on top.
+        _draw_binary_overlay(vis, cobb_binary_result)
+        return vis
+
+    # ----------------------------------------------------- BACK-COMPAT PATH
+    # Ciclo 5.1 single-curve layout (used when cobb_from_binary couldn't
+    # detect curves above the noise floor, OR when an upstream caller passes
+    # the legacy schema without "curves").
+
+    # If multiclass failed: text-only fallback + binary overlay if we have it.
+    if not cobb_multiclass_result or not cobb_multiclass_result.get("success"):
+        _draw_binary_overlay(vis, cobb_binary_result)
+        if cobb_binary_deg is not None:
+            cv2.putText(
+                vis, f"Cobb (Binary): {cobb_binary_deg:.1f} deg",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
+            )
+            _draw_speedometer(vis, cobb_binary_deg)
+        cv2.putText(
+            vis, "Multiclass Cobb visualization unavailable",
+            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+        )
+        return vis
+
+    upper_name = cobb_multiclass_result.get("upper_end_vertebra")
+    lower_name = cobb_multiclass_result.get("lower_end_vertebra")
+    cobb_deg = float(cobb_multiclass_result.get("cobb_angle_deg", 0.0))
+    upper_v = vert_by_name.get(upper_name)
+    lower_v = vert_by_name.get(lower_name)
+
+    if upper_v is None or lower_v is None:
+        cv2.putText(
+            vis, f"Cobb (Multiclass): {cobb_deg:.1f} deg",
+            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
+        )
+        if cobb_binary_deg is not None:
+            cv2.putText(
+                vis, f"Cobb (Binary): {cobb_binary_deg:.1f} deg",
+                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
+            )
+        _draw_binary_overlay(vis, cobb_binary_result)
+        return vis
+
+    _draw_single_cobb_curve(
+        vis=vis,
+        multiclass_mask=multiclass_mask,
+        upper_v=upper_v,
+        lower_v=lower_v,
+        cobb_deg=cobb_deg,
+        color=(255, 0, 0),
+        draw_speedometer_if_small=True,
+    )
+
+    # Headers.
     cv2.putText(
         vis, f"Cobb (Multiclass): {cobb_deg:.1f} deg  ({upper_name} - {lower_name})",
         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2,
@@ -497,21 +630,7 @@ def draw_cobb_angle_visualization(
             lineType=cv2.LINE_AA,
         )
 
-    # 10) End-vertebra labels next to the boxes.
-    for v, label in (
-        (upper_v, f"Superior end vertebra ({upper_name})"),
-        (lower_v, f"Inferior end vertebra ({lower_name})"),
-    ):
-        min_row, min_col, max_row, max_col = v["bbox"]
-        text_x = min(max_col + 5, w - 220)
-        text_y = max(20, (min_row + max_row) // 2)
-        cv2.putText(
-            vis, label, (text_x, text_y),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1,
-            lineType=cv2.LINE_AA,
-        )
-
-    # 11) Binary overlay LAST so the spline + inflection points sit on top
+    # Binary overlay LAST so the spline + inflection points sit on top
     # of the green fill (otherwise they would disappear under the addWeighted).
     _draw_binary_overlay(vis, cobb_binary_result)
 
