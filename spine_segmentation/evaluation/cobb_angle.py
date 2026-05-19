@@ -27,6 +27,15 @@ from spine_segmentation.postprocessing.vertebra_ordering import (
 from spine_segmentation.data.class_mapping import get_class_names
 
 
+# Minimum y-distance between adjacent inflection points (in spline-eval px)
+# below which the resulting "curve" is treated as spline noise rather than a
+# real anatomic curve. The spline is evaluated on a 500-point grid spanning
+# the spine's y-extent; 30 grid steps is ~6% of the spine height and roughly
+# one vertebra at 512x512 input. Curves tighter than that produced spurious
+# entries like "5.9 deg T9-T9" on S_22 (Ciclo 5.4 fix H).
+MIN_IP_Y_DISTANCE_PX = 30
+
+
 # ============================================================================
 # Method A: Cobb Angle from Binary Segmentation
 # (Replicates and improves the previous semester's approach)
@@ -222,6 +231,14 @@ def _cobb_from_binary_single_pass(
         for i in range(len(sign_changes) - 1):
             ip_a = int(sign_changes[i])
             ip_b = int(sign_changes[i + 1])
+            # Ciclo 5.4 fix H: skip IPs that are too close vertically. A real
+            # anatomic curve spans at least ~1 vertebra; pairs closer than
+            # MIN_IP_Y_DISTANCE_PX are spline noise (sub-vertebral wiggles)
+            # and map both ends to the same multiclass vertebra after
+            # label transfer, producing "T9-T9"-style degenerate entries.
+            y_dist = abs(float(y_eval[ip_b]) - float(y_eval[ip_a]))
+            if y_dist < MIN_IP_Y_DISTANCE_PX:
+                continue
             angle = _cobb_between_inflection_points(dx_dy, ip_a, ip_b)
             if angle < min_curve_deg:
                 continue
@@ -295,6 +312,29 @@ def assign_vertebra_names_to_curves(
         lower = min(multiclass_vertebrae, key=lambda v: abs(v["centroid_y"] - ip_low_y))
         curve["upper_vertebra"] = upper["name"]
         curve["lower_vertebra"] = lower["name"]
+
+    # Ciclo 5.4 fix H: drop curves where both IPs ended up mapping to the
+    # SAME multiclass vertebra (upper_vertebra == lower_vertebra). That
+    # happens when adjacent IPs are close in y, falling near the same
+    # centroid by nearest-y. Even though the angle passed min_curve_deg
+    # and the IPs passed MIN_IP_Y_DISTANCE_PX, an anatomically degenerate
+    # label like "5.9 deg T9-T9" confuses the clinician — it has no clear
+    # interpretation as a curve between two end vertebrae. Filter
+    # silently and reindex rank so principal/secondary stay sequential.
+    # Curves without names (multiclass unavailable) survive: they only
+    # have None == None, which the equality check would flag, but we
+    # only filter when BOTH names are present and equal.
+    filtered = [
+        c for c in curves
+        if not (
+            c.get("upper_vertebra") is not None
+            and c.get("upper_vertebra") == c.get("lower_vertebra")
+        )
+    ]
+    if len(filtered) != len(curves):
+        curves[:] = filtered
+        for i, c in enumerate(curves, start=1):
+            c["rank"] = i
     return curves
 
 

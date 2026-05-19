@@ -177,6 +177,13 @@ class SpineSegmentationPipeline:
             # Cycle 5.2: enrich every binary-detected curve with vertebra names
             # using the multiclass detection (label transfer). The multiclass
             # mask is noisy for Cobb computation but useful for NAMING.
+            #
+            # Cycle 5.4 fix H: `assign_vertebra_names_to_curves` also drops
+            # curves with upper == lower (degenerate). After it returns, the
+            # top-level `cobb_angle_deg` and `inflection_points` may be out
+            # of sync with the now-filtered curves list. Re-sync from the
+            # principal of the filtered list, or zero out if the entire list
+            # was filtered (rare: every curve degenerate).
             if (
                 results.get("cobb_binary")
                 and results["cobb_binary"].get("curves")
@@ -184,6 +191,20 @@ class SpineSegmentationPipeline:
                 assign_vertebra_names_to_curves(
                     results["cobb_binary"]["curves"], vertebrae
                 )
+                curves_after = results["cobb_binary"].get("curves") or []
+                if curves_after:
+                    principal = curves_after[0]
+                    results["cobb_binary"]["cobb_angle_deg"] = (
+                        principal["cobb_angle_deg"]
+                    )
+                    results["cobb_binary"]["inflection_points"] = [
+                        principal["ip_upper"], principal["ip_lower"],
+                    ]
+                else:
+                    # All curves were degenerate (upper == lower). Treat as
+                    # a straight spine for downstream consumers.
+                    results["cobb_binary"]["cobb_angle_deg"] = 0.0
+                    results["cobb_binary"]["inflection_points"] = []
 
         # Ciclo 5.3 fix F: compute how much of the spine the binary mask
         # actually covered. The UI uses this to warn the user when "0 deg"

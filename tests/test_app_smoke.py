@@ -358,6 +358,98 @@ def test_compute_orientation_info_handles_empty_or_collinear():
 
 
 # ----------------------------------------------------------------------------
+# Degenerate-curve filtering — Ciclo 5.4 (fix H)
+# ----------------------------------------------------------------------------
+
+def test_cobb_from_binary_skips_close_inflection_points():
+    """A spline that produces a real S-curve PLUS a sub-vertebra wiggle must
+    yield only the real curve. The wiggle (two IPs closer than
+    MIN_IP_Y_DISTANCE_PX) produced the bogus "5.9 deg T9-T9" entry on S_22.
+    Synth: superimpose a wide sine on a high-freq jitter and verify the
+    high-freq pairs get filtered."""
+    import numpy as np
+    from spine_segmentation.evaluation.cobb_angle import (
+        MIN_IP_Y_DISTANCE_PX,
+        cobb_from_binary,
+    )
+
+    H, W = 800, 400
+    mask = np.zeros((H, W), dtype=np.uint8)
+    # Big slow sine (real curves) + small fast jitter (noise that would
+    # otherwise create dense extra IPs).
+    for y in range(H):
+        slow = 60 * np.sin(2 * np.pi * y / H * 2.0)         # 2 cycles, real
+        fast = 4 * np.sin(2 * np.pi * y / 20.0)             # 40 cycles, noise
+        cx = int(W / 2 + slow + fast)
+        mask[y, max(0, cx - 8):min(W, cx + 8)] = 1
+
+    # Use a smoothing low enough that the spline tries to pick up the
+    # fast jitter — then verify the filter drops sub-vertebral curves.
+    r = cobb_from_binary(mask, smoothing_factor=500.0)
+    assert r["success"]
+    # Every kept curve must have IPs farther apart than the threshold.
+    for c in r.get("curves") or []:
+        y_dist = abs(c["ip_upper"][1] - c["ip_lower"][1])
+        assert y_dist >= MIN_IP_Y_DISTANCE_PX, (
+            f"curve with y_dist={y_dist} slipped past the filter "
+            f"(threshold {MIN_IP_Y_DISTANCE_PX})"
+        )
+
+
+def test_assign_vertebra_names_drops_same_vertebra_curves():
+    """When label-transfer maps both IPs of a curve to the same multiclass
+    vertebra, that curve must be REMOVED from the list (not just flagged).
+    The remaining curves are re-ranked so that 'principal/secundaria' stay
+    sequential. Curves without multiclass names (None==None) survive."""
+    from spine_segmentation.evaluation.cobb_angle import (
+        assign_vertebra_names_to_curves,
+    )
+
+    # Two curves: first ends inside T9 (both IPs near y=200), second spans
+    # T5..T10 (legitimate).
+    curves = [
+        # Degenerate: both IPs map to T9 (centroid_y=200).
+        {"ip_upper": (110.0, 195.0), "ip_lower": (110.0, 205.0),
+         "cobb_angle_deg": 5.9, "rank": 1},
+        # Real: maps to T5 -> T10.
+        {"ip_upper": (105.0, 55.0), "ip_lower": (115.0, 250.0),
+         "cobb_angle_deg": 30.0, "rank": 2},
+    ]
+    vertebrae = [
+        {"name": "T5",  "centroid_y": 60.0},
+        {"name": "T9",  "centroid_y": 200.0},
+        {"name": "T10", "centroid_y": 245.0},
+    ]
+    out = assign_vertebra_names_to_curves(curves, vertebrae)
+    # Degenerate curve removed; real one survives and is now rank=1.
+    assert len(out) == 1
+    assert out[0]["upper_vertebra"] == "T5"
+    assert out[0]["lower_vertebra"] == "T10"
+    assert out[0]["rank"] == 1
+    # Mutation is in-place: caller sees the same shortened list.
+    assert curves is out and len(curves) == 1
+
+
+def test_assign_vertebra_names_keeps_curves_without_multiclass():
+    """If multiclass is unavailable (empty list), every curve gets
+    upper_vertebra=None and lower_vertebra=None. None == None should NOT
+    trigger the degenerate filter — those curves still carry geometric
+    info."""
+    from spine_segmentation.evaluation.cobb_angle import (
+        assign_vertebra_names_to_curves,
+    )
+
+    curves = [
+        {"ip_upper": (10.0, 20.0), "ip_lower": (15.0, 100.0),
+         "cobb_angle_deg": 12.0, "rank": 1},
+    ]
+    out = assign_vertebra_names_to_curves(curves, [])
+    assert len(out) == 1
+    assert out[0]["upper_vertebra"] is None
+    assert out[0]["lower_vertebra"] is None
+
+
+# ----------------------------------------------------------------------------
 # Binary mask cleanup — Ciclo 5.3 (fix B)
 # ----------------------------------------------------------------------------
 
