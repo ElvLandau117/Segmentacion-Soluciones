@@ -21,6 +21,41 @@ from spine_segmentation.deployment.weights import ensure_weights
 from spine_segmentation.evaluation.explainability import generate_confidence_map, generate_gradcam
 
 
+def rotate_image_for_analysis(image: np.ndarray, deg: float) -> np.ndarray:
+    """Rotate `image` by `deg` degrees about its center for analysis (Ciclo 5.5).
+
+    Pure function at module level so tests can exercise it without spinning
+    up a Gradio app. The Gradio `predict()` closure calls this with the
+    slider value before delegating to `pipeline.predict()`.
+
+    Args:
+        image: (H, W, 3) RGB uint8. May be None — returned unchanged.
+        deg: rotation in degrees. Positive = counter-clockwise in display
+            space (cv2 convention). Sub-degree magnitudes (|deg| < 0.5)
+            are treated as 0 so the slider sitting at 0 doesn't pay for a
+            warp call that produces a numerically-different array.
+
+    Returns:
+        The rotated image with the same shape as input. Corners that fall
+        outside the original canvas are cut; the canvas does NOT expand.
+        Border pixels are filled by `cv2.BORDER_REPLICATE` so a rotated
+        radiograph does not introduce artificial black bands that the
+        binary segmenter could confuse with the chest cavity.
+    """
+    if image is None:
+        return image
+    if abs(float(deg)) < 0.5:
+        return image
+    h, w = image.shape[:2]
+    center = (w / 2.0, h / 2.0)
+    M = cv2.getRotationMatrix2D(center, float(deg), 1.0)
+    return cv2.warpAffine(
+        image, M, (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REPLICATE,
+    )
+
+
 def build_results_text(
     cobb_binary: dict | None,
     cobb_multiclass: dict | None,
@@ -299,19 +334,30 @@ def create_app(
             multiclass_model_name=multiclass_model_name,
         )
 
-    def predict(input_image):
-        """Process uploaded radiograph."""
+    def predict(input_image, rotation_deg=0.0):
+        """Process uploaded radiograph, optionally rotated by `rotation_deg`.
+
+        Ciclo 5.5: the UI slider lets the clinician straighten a tilted
+        radiograph before analysis. The rotation is applied here, in the
+        UI layer, BEFORE the segmentation pipeline runs — so the pipeline
+        sees an image whose spine is as vertical as the clinician thinks
+        is best. The rotation warning from Ciclo 5.4 stays useful as a
+        post-hoc check ("you rotated, but it's still tilted X deg").
+        """
         if input_image is None:
-            return None, None, None, "Please upload a radiograph image."
+            return None, None, None, None, "Please upload a radiograph image."
 
         if pipeline is None:
-            return None, None, None, "No model loaded. Please provide checkpoint paths."
+            return None, None, None, None, "No model loaded. Please provide checkpoint paths."
 
         # Convert to RGB if needed
         if input_image.ndim == 2:
             input_image = cv2.cvtColor(input_image, cv2.COLOR_GRAY2RGB)
         elif input_image.shape[2] == 4:
             input_image = cv2.cvtColor(input_image, cv2.COLOR_RGBA2RGB)
+
+        # Apply manual rotation (Ciclo 5.5) BEFORE handing to the pipeline.
+        input_image = rotate_image_for_analysis(input_image, rotation_deg)
 
         # Run prediction
         results = pipeline.predict(input_image)
@@ -399,6 +445,24 @@ def create_app(
                     type="numpy",
                     height=500,
                 )
+                # Ciclo 5.5: manual rotation. The clinician decides if the
+                # uploaded radiograph needs to be straightened before the
+                # binary Cobb pipeline (which fits x = f(y), assuming a
+                # vertical spine) sees it. Positive angle = counter-clockwise
+                # in display space (cv2 convention).
+                rotation_slider = gr.Slider(
+                    minimum=-180,
+                    maximum=180,
+                    value=0,
+                    step=1,
+                    label="Rotate image (degrees). Negative = clockwise.",
+                )
+                with gr.Row():
+                    btn_rot_minus_90 = gr.Button("↺ -90°", size="sm")
+                    btn_rot_minus_5 = gr.Button("↺ -5°", size="sm")
+                    btn_rot_reset = gr.Button("Reset", size="sm")
+                    btn_rot_plus_5 = gr.Button("↻ +5°", size="sm")
+                    btn_rot_plus_90 = gr.Button("↻ +90°", size="sm")
                 predict_btn = gr.Button("Analyze", variant="primary", size="lg")
 
             with gr.Column(scale=2):
@@ -429,9 +493,33 @@ def create_app(
                     interactive=False,
                 )
 
+        # Quick-rotation buttons: each adjusts the slider value by a fixed
+        # delta. Reset jumps to 0. Values are clamped to (-180, 180) by
+        # Gradio's slider bounds.
+        def _adjust_rotation(current, delta):
+            return float(max(-180.0, min(180.0, (current or 0.0) + delta)))
+
+        btn_rot_minus_90.click(
+            fn=lambda v: _adjust_rotation(v, -90),
+            inputs=[rotation_slider], outputs=[rotation_slider],
+        )
+        btn_rot_minus_5.click(
+            fn=lambda v: _adjust_rotation(v, -5),
+            inputs=[rotation_slider], outputs=[rotation_slider],
+        )
+        btn_rot_reset.click(fn=lambda: 0.0, outputs=[rotation_slider])
+        btn_rot_plus_5.click(
+            fn=lambda v: _adjust_rotation(v, 5),
+            inputs=[rotation_slider], outputs=[rotation_slider],
+        )
+        btn_rot_plus_90.click(
+            fn=lambda v: _adjust_rotation(v, 90),
+            inputs=[rotation_slider], outputs=[rotation_slider],
+        )
+
         predict_btn.click(
             fn=predict,
-            inputs=[input_image],
+            inputs=[input_image, rotation_slider],
             outputs=[binary_output, multi_output, cobb_output, explain_output, results_text],
         )
 

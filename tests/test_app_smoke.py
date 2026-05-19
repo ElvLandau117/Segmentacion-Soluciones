@@ -245,6 +245,60 @@ def test_binary_overlay_renders_spline_and_inflection_points():
 
 
 # ----------------------------------------------------------------------------
+# Manual rotation control — Ciclo 5.5 (fix K)
+# ----------------------------------------------------------------------------
+
+def test_rotate_image_for_analysis_zero_is_identity():
+    """Slider sitting at 0 (the default) must return the input array
+    untouched — both equal magnitudes (|deg| < 0.5) and exact zero. We
+    do NOT want every Analyze click to pay for a no-op warpAffine that
+    introduces sub-pixel interpolation noise into the binary segmenter."""
+    import numpy as np
+    from spine_segmentation.deployment.app import rotate_image_for_analysis
+
+    img = np.random.default_rng(0).integers(0, 256, (64, 48, 3), dtype=np.uint8)
+    out_zero = rotate_image_for_analysis(img, 0.0)
+    out_tiny = rotate_image_for_analysis(img, 0.3)  # below the 0.5 deg deadband
+    out_neg_tiny = rotate_image_for_analysis(img, -0.4)
+
+    assert out_zero is img, "zero rotation should short-circuit, not warp"
+    assert out_tiny is img
+    assert out_neg_tiny is img
+
+
+def test_rotate_image_for_analysis_90_swaps_axes():
+    """Rotating by +90 deg (CCW in cv2 convention) must turn a vertical
+    line into a horizontal one. We verify on a (200, 200, 3) canvas with
+    a single vertical white stripe at x=100; after the rotation the
+    bright row should be near y=100 instead of a bright column."""
+    import numpy as np
+    from spine_segmentation.deployment.app import rotate_image_for_analysis
+
+    img = np.zeros((200, 200, 3), dtype=np.uint8)
+    img[:, 98:103, :] = 255  # vertical bright stripe
+    rotated = rotate_image_for_analysis(img, 90.0)
+
+    # Before: column 100 is bright, row sums are uniform.
+    col_brightness_before = img.sum(axis=0).sum(axis=-1)
+    assert col_brightness_before[100] > col_brightness_before[0]
+
+    # After: row 100 is bright, col sums are uniform.
+    row_brightness_after = rotated.sum(axis=1).sum(axis=-1)
+    assert row_brightness_after[100] > row_brightness_after[0]
+    # And the column at x=100 is no longer the brightest one.
+    col_brightness_after = rotated.sum(axis=0).sum(axis=-1)
+    assert col_brightness_after[100] < row_brightness_after[100]
+
+
+def test_rotate_image_for_analysis_handles_none():
+    """None input must pass through unchanged so the Gradio predict()
+    closure does not have to special-case the "no image uploaded" path."""
+    from spine_segmentation.deployment.app import rotate_image_for_analysis
+    assert rotate_image_for_analysis(None, 0.0) is None
+    assert rotate_image_for_analysis(None, 25.0) is None
+
+
+# ----------------------------------------------------------------------------
 # Orientation detection — Ciclo 5.4 (fix G)
 # ----------------------------------------------------------------------------
 
