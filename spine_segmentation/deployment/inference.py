@@ -17,13 +17,19 @@ from spine_segmentation.config import (
 from spine_segmentation.models.smp_models import create_model
 from spine_segmentation.data.transforms import resize_with_padding, get_inference_transforms
 from spine_segmentation.data.class_mapping import get_class_names, get_num_classes
-from spine_segmentation.postprocessing.morphology import clean_binary_mask, clean_multiclass_mask
+from spine_segmentation.postprocessing.morphology import (
+    clean_binary_mask,
+    clean_multiclass_mask,
+    extract_spine_skeleton,
+    get_skeleton_points,
+)
 from spine_segmentation.evaluation.cobb_angle import (
     assign_vertebra_names_to_curves,
     cobb_from_binary,
     cobb_from_multiclass,
 )
 from spine_segmentation.evaluation.coverage import compute_coverage_info
+from spine_segmentation.evaluation.orientation import compute_orientation_info
 from spine_segmentation.postprocessing.vertebra_ordering import (
     compute_endplate_angles,
     extract_vertebra_info,
@@ -100,6 +106,7 @@ class SpineSegmentationPipeline:
             "vertebrae_detected": [],
             "cobb_visualization": None,
             "coverage_info": None,
+            "orientation_info": None,
         }
 
         # Preprocess
@@ -129,6 +136,14 @@ class SpineSegmentationPipeline:
             # Cobb angle from binary
             cobb_result = cobb_from_binary(binary_mask)
             results["cobb_binary"] = cobb_result
+
+            # Ciclo 5.4 fix G: detect spine rotation. Use the same skeleton
+            # extraction the Cobb pipeline uses, so the orientation reading
+            # matches the data Cobb actually saw. SVD on the points gives
+            # the principal axis vs vertical; the UI warns when |tilt| > 12 deg.
+            skeleton = extract_spine_skeleton(binary_mask)
+            skeleton_points = get_skeleton_points(skeleton)
+            results["orientation_info"] = compute_orientation_info(skeleton_points)
 
         # Multiclass prediction.
         # `vertebrae` is also consumed by the coverage analysis (Ciclo 5.3),

@@ -26,6 +26,7 @@ def build_results_text(
     cobb_multiclass: dict | None,
     vertebrae_detected: list | None = None,
     coverage_info: dict | None = None,
+    orientation_info: dict | None = None,
 ) -> str:
     """Render the multi-line Diagnosis Results panel with multi-curve support.
 
@@ -186,6 +187,35 @@ def build_results_text(
                 "WARNING: Partial spine coverage — Cobb angle may be misleading."
             )
 
+    # ----------------------------------------------------- ROTATION WARNING
+    # Ciclo 5.4 fix G: when the spine skeleton's principal axis deviates more
+    # than TILT_THRESHOLD_DEG from vertical, the binary Cobb method (which
+    # fits x = f(y)) reports rotation as scoliosis. Emit a warning so the
+    # clinician knows to trust the multiclass measurement (which is per-
+    # vertebra and largely rotation-invariant) instead. The binary number
+    # is left in place — confirmed UX decision: minimum-change, maximum-info.
+    is_tilted = bool(
+        orientation_info
+        and orientation_info.get("success")
+        and orientation_info.get("is_tilted")
+    )
+    if is_tilted:
+        tilt_abs = orientation_info.get("tilt_abs_deg", 0.0)
+        threshold = orientation_info.get("threshold_deg", 12.0)
+        lines.append("\n=== ROTATION WARNING ===")
+        lines.append(
+            f"Image appears tilted {tilt_abs:.1f} deg from vertical "
+            f"(threshold {threshold:.0f} deg)."
+        )
+        lines.append(
+            "The binary Cobb method fits x = f(y) and may report rotation "
+            "as scoliosis."
+        )
+        lines.append(
+            "Re-capture with the patient straight, or trust the multiclass "
+            "measurement (per-vertebra, rotation-invariant)."
+        )
+
     # -------------------------------------------------------------- ASSESSMENT
     # Severity uses the LARGEST curve detected by the binary method. The
     # binary method is the source of truth on our data (MAE 23 deg, r=0.66,
@@ -296,6 +326,7 @@ def create_app(
             cobb_multiclass=results.get("cobb_multiclass"),
             vertebrae_detected=results.get("vertebrae_detected"),
             coverage_info=results.get("coverage_info"),
+            orientation_info=results.get("orientation_info"),
         )
 
         # Generate explainability panel

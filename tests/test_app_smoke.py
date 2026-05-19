@@ -295,6 +295,46 @@ def test_compute_orientation_info_vertical_spine():
     assert info["tilt_abs_deg"] < 2.0
 
 
+def test_build_results_text_emits_rotation_warning_when_tilted():
+    """When orientation_info reports is_tilted=True, the diagnosis text must
+    include the ROTATION WARNING block with the measured angle, threshold,
+    and the 'multiclass is rotation-invariant' guidance. Without tilt, the
+    block is absent."""
+    from spine_segmentation.deployment.app import build_results_text
+
+    # Tilted -> block visible
+    text_tilted = build_results_text(
+        cobb_binary={"success": True, "cobb_angle_deg": 31.8,
+                     "curves": [{"cobb_angle_deg": 31.8, "upper_vertebra": "L3",
+                                 "lower_vertebra": "L4", "direction": "right",
+                                 "rank": 1}]},
+        cobb_multiclass={"success": True, "cobb_angle_deg": 0.6,
+                         "upper_end_vertebra": "C5", "lower_end_vertebra": "L4"},
+        orientation_info={"success": True, "tilt_deg": 18.4, "tilt_abs_deg": 18.4,
+                          "is_tilted": True, "threshold_deg": 12.0, "n_points": 200},
+    )
+    assert "=== ROTATION WARNING ===" in text_tilted
+    assert "18.4 deg" in text_tilted
+    assert "threshold 12 deg" in text_tilted
+    assert "multiclass" in text_tilted
+
+    # Not tilted -> no block
+    text_ok = build_results_text(
+        cobb_binary={"success": True, "cobb_angle_deg": 5.0},
+        cobb_multiclass=None,
+        orientation_info={"success": True, "tilt_deg": 2.0, "tilt_abs_deg": 2.0,
+                          "is_tilted": False, "threshold_deg": 12.0, "n_points": 200},
+    )
+    assert "ROTATION WARNING" not in text_ok
+
+    # No orientation_info -> no block (back-compat path)
+    text_none = build_results_text(
+        cobb_binary={"success": True, "cobb_angle_deg": 5.0},
+        cobb_multiclass=None,
+    )
+    assert "ROTATION WARNING" not in text_none
+
+
 def test_compute_orientation_info_handles_empty_or_collinear():
     """Robustness: None input, empty array, or <3 points must NOT crash and
     must return success=False so callers can skip the warning gracefully."""
