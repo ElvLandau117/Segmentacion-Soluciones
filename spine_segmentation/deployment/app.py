@@ -26,69 +26,118 @@ def build_results_text(
     cobb_multiclass: dict | None,
     vertebrae_detected: list | None = None,
 ) -> str:
-    """Render the multi-line Diagnosis Results panel.
+    """Render the multi-line Diagnosis Results panel with multi-curve support.
 
     Pure function (no I/O, no Gradio deps) so it can be unit-tested without
     spinning up an app or loading a model. The Gradio predict() closure
-    feeds the output of this directly into the results Textbox.
+    feeds the output directly into the results Textbox.
 
-    Layout (sections are omitted when the corresponding data is missing):
+    When cobb_binary carries a non-empty "curves" list (Ciclo 5.2), the panel
+    lists every detected curve (principal, secondary, ...) with its direction
+    and the vertebrae closest to its inflection points. When "curves" is
+    missing or empty, the layout degrades to the single-curve Ciclo 5 format.
 
-      === COBB ANGLE ===
-      Binary method:     XX.X deg  (more robust, recommended)
-      Multiclass method: YY.Y deg  (anatomical info: Upper=Cn, Lower=Tm)
+    Layout (sections omitted when the corresponding data is missing):
 
-      CONCORDANCE: High agreement | Review recommended | Significant discrepancy
-          |Binary - Multiclass| = ZZ.Z deg
+      === COBB ANGLE - Curvas detectadas ===
+      Curva principal:    XX.X deg  (Tn - Lm, convexidad <right|left>)
+      Curva secundaria:   YY.Y deg  (Tn - Lm, convexidad <opposite>)
+      [Curva N:            ZZ.Z deg  ...  — only if >2]
 
-      === ASSESSMENT (based on Binary) ===
-      Normal | Mild | Moderate | Severe
+      Cross-check binary vs multiclass principal:
+        Binary principal:    XX.X deg
+        Multiclass:          MM.M deg  (anatomical reference, illustration only)
+        Concordancia: <High agreement | Review | Significant discrepancy>
+
+      === ASSESSMENT (curva mayor) ===
+      <Normal/Mild/Moderate/Severe>
+      Numero total de curvas detectadas: N (S-curve / triple-curve / ...)
 
       === VERTEBRAE DETECTED (N) ===
       C7, T1, ...
     """
     binary_ok = bool(cobb_binary and cobb_binary.get("success"))
     multi_ok = bool(cobb_multiclass and cobb_multiclass.get("success"))
+    curves = cobb_binary.get("curves") if binary_ok else None
 
-    lines: list[str] = ["=== COBB ANGLE ==="]
-    if binary_ok:
+    lines: list[str] = []
+
+    # -------------------------------------------------------------------- COBB
+    if curves:
+        lines.append("=== COBB ANGLE - Curvas detectadas ===")
+        labels = ["Curva principal:   ", "Curva secundaria:  "]
+        for i, c in enumerate(curves):
+            label = labels[i] if i < len(labels) else f"Curva {i + 1}:         "
+            up = c.get("upper_vertebra") or "?"
+            lo = c.get("lower_vertebra") or "?"
+            direction = c.get("direction", "unknown")
+            conv = {
+                "right": "convexidad derecha",
+                "left": "convexidad izquierda",
+                "neutral": "sin convexidad clara",
+            }.get(direction, "direccion desconocida")
+            lines.append(
+                f"{label} {c['cobb_angle_deg']:5.1f} deg  ({up} - {lo}, {conv})"
+            )
+    elif binary_ok:
+        # Binary succeeded but no curves passed the noise floor (straight spine).
+        lines.append("=== COBB ANGLE ===")
         lines.append(
-            f"Binary method:     {cobb_binary['cobb_angle_deg']:5.1f} deg  (more robust, recommended)"
+            f"Binary method:     {cobb_binary['cobb_angle_deg']:5.1f} deg  "
+            "(no clinically meaningful curves above the noise floor)"
         )
     elif cobb_binary:
+        lines.append("=== COBB ANGLE ===")
         lines.append(
             f"Binary method:     ERROR - {cobb_binary.get('error', 'unknown')}"
         )
 
-    if multi_ok:
-        upper = cobb_multiclass.get("upper_end_vertebra", "N/A")
-        lower = cobb_multiclass.get("lower_end_vertebra", "N/A")
-        lines.append(
-            f"Multiclass method: {cobb_multiclass['cobb_angle_deg']:5.1f} deg  "
-            f"(anatomical info: Upper={upper}, Lower={lower})"
-        )
-    elif cobb_multiclass:
-        lines.append(
-            f"Multiclass method: ERROR - {cobb_multiclass.get('error', 'unknown')}"
-        )
-
-    # Agreement indicator (only when both methods succeeded)
+    # ------------------------------------------------ Cross-check vs multiclass
     if binary_ok and multi_ok:
-        diff = abs(cobb_binary["cobb_angle_deg"] - cobb_multiclass["cobb_angle_deg"])
+        # Compare the binary principal angle (curves[0] when multi-curve detection
+        # ran, else the back-compat single cobb_angle_deg) against the multiclass.
+        binary_principal = (
+            curves[0]["cobb_angle_deg"] if curves
+            else cobb_binary["cobb_angle_deg"]
+        )
+        multi_deg = cobb_multiclass["cobb_angle_deg"]
+        diff = abs(binary_principal - multi_deg)
         if diff <= 5.0:
             concordance = "High agreement - both methods coincide"
         elif diff <= 15.0:
             concordance = "Review recommended - methods differ slightly"
         else:
             concordance = "Significant discrepancy - specialist judgment required"
-        lines.append(f"\nCONCORDANCE: {concordance}")
-        lines.append(f"    |Binary - Multiclass| = {diff:.1f} deg")
+        upper = cobb_multiclass.get("upper_end_vertebra", "N/A")
+        lower = cobb_multiclass.get("lower_end_vertebra", "N/A")
+        lines.append("\n=== CROSS-CHECK binary vs multiclass ===")
+        lines.append(f"    Binary principal:    {binary_principal:5.1f} deg")
+        lines.append(
+            f"    Multiclass:          {multi_deg:5.1f} deg  "
+            f"(Upper={upper}, Lower={lower}; illustration / anatomical reference only)"
+        )
+        lines.append(f"    CONCORDANCIA: {concordance}  (diff = {diff:.1f} deg)")
+    elif multi_ok and not binary_ok:
+        # Binary failed entirely; multiclass is the only signal available.
+        upper = cobb_multiclass.get("upper_end_vertebra", "N/A")
+        lower = cobb_multiclass.get("lower_end_vertebra", "N/A")
+        lines.append(
+            f"Multiclass method (fallback): {cobb_multiclass['cobb_angle_deg']:5.1f} deg  "
+            f"(Upper={upper}, Lower={lower})"
+        )
+    elif cobb_multiclass and not multi_ok:
+        lines.append(
+            f"Multiclass method: ERROR - {cobb_multiclass.get('error', 'unknown')}"
+        )
 
-    # Severity assessment — binary is the source of truth on our data
-    # (binary MAE 23 deg with Pearson 0.66, vs multiclass MAE 26-45 deg with
-    # negative correlation in the worst case). Multiclass is fallback only.
+    # -------------------------------------------------------------- ASSESSMENT
+    # Severity uses the LARGEST curve detected by the binary method. The
+    # binary method is the source of truth on our data (MAE 23 deg, r=0.66,
+    # vs multiclass MAE 26-45 deg with negative correlation in the worst case).
     assessment_source = None
-    if binary_ok:
+    if curves:
+        assessment_source = ("Binary principal", curves[0]["cobb_angle_deg"])
+    elif binary_ok:
         assessment_source = ("Binary", cobb_binary["cobb_angle_deg"])
     elif multi_ok:
         assessment_source = ("Multiclass fallback", cobb_multiclass["cobb_angle_deg"])
@@ -106,6 +155,14 @@ def build_results_text(
         lines.append(f"\n=== ASSESSMENT (based on {source_label}) ===")
         lines.append(assessment)
 
+        if curves and len(curves) > 1:
+            shape = {
+                2: "doble curva (S-shape)",
+                3: "triple curva",
+            }.get(len(curves), f"{len(curves)} curvas")
+            lines.append(f"Numero total de curvas detectadas: {len(curves)} ({shape})")
+
+    # ---------------------------------------------------- Vertebrae list
     if vertebrae_detected:
         lines.append(f"\n=== VERTEBRAE DETECTED ({len(vertebrae_detected)}) ===")
         lines.append(", ".join(vertebrae_detected))

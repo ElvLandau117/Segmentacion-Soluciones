@@ -78,8 +78,9 @@ def test_build_results_text_uses_binary_for_assessment():
 
 
 def test_build_results_text_includes_concordance_when_both_succeed():
-    """When both methods produce a Cobb, the CONCORDANCE block must appear with
-    the correct label for the difference range."""
+    """When both methods produce a Cobb, the CONCORDANCIA cross-check block must
+    appear with the correct label for the difference range (Ciclo 5.2: header
+    renamed CONCORDANCE -> CONCORDANCIA to match the multi-curve UI in Spanish)."""
     from spine_segmentation.deployment.app import build_results_text
 
     # diff = 1.5 -> High agreement
@@ -88,7 +89,7 @@ def test_build_results_text_includes_concordance_when_both_succeed():
         cobb_multiclass={"success": True, "cobb_angle_deg": 21.5,
                          "upper_end_vertebra": "T5", "lower_end_vertebra": "T11"},
     )
-    assert "CONCORDANCE" in text_high
+    assert "CONCORDANCIA" in text_high
     assert "High agreement" in text_high
 
     # diff = 25 -> Significant discrepancy
@@ -97,14 +98,14 @@ def test_build_results_text_includes_concordance_when_both_succeed():
         cobb_multiclass={"success": True, "cobb_angle_deg": 35.0,
                          "upper_end_vertebra": "T5", "lower_end_vertebra": "T11"},
     )
-    assert "CONCORDANCE" in text_disc
+    assert "CONCORDANCIA" in text_disc
     assert "Significant discrepancy" in text_disc
 
 
 def test_build_results_text_falls_back_to_multiclass_when_binary_fails():
     """If the binary method failed (e.g. empty mask), the Assessment must use
     multiclass as a labelled fallback so the user still gets a severity hint.
-    No CONCORDANCE block in this case (only one Cobb value)."""
+    No CONCORDANCIA block in this case (only one Cobb value)."""
     from spine_segmentation.deployment.app import build_results_text
 
     text = build_results_text(
@@ -115,7 +116,7 @@ def test_build_results_text_falls_back_to_multiclass_when_binary_fails():
 
     assert "ASSESSMENT (based on Multiclass fallback)" in text
     assert "Moderate" in text
-    assert "CONCORDANCE" not in text
+    assert "CONCORDANCIA" not in text
 
 
 def test_draw_cobb_angle_visualization_modifies_image():
