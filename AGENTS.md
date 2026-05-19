@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -382,6 +382,54 @@ medico iteraba a ciegas, gastando 10s por intento.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 16.
 
+### Ciclo 5.7 ✅ COMPLETO — Limpieza multiclass del frontend + toggle ES/EN
+Feedback de Elvis tras probar el live preview del 5.6: la info de
+multiclass (bloque `=== CROSS-CHECK ===` con "Multiclass: 90.0 deg
+(Upper=..., Lower=...; illustration only)" + "CONCORDANCIA: ...") en el
+panel Diagnosis Results confundia al usuario — sin contexto algoritmico,
+los numeros parecian contradictorios (binary 4 deg vs multi 90 deg). Y la
+UI era inconsistente: el reporte en español pero el header markdown y
+tabs en ingles.
+
+- [x] **Fix M — Multiclass cleanup del frontend.** Eliminado el bloque
+      `=== CROSS-CHECK binary vs multiclass ===` entero de
+      `build_results_text` ([app.py](spine_segmentation/deployment/app.py)).
+      Eliminada tambien la 3ra linea cyan "Multiclass (illustration only):
+      X.X deg" del header en `draw_cobb_angle_visualization`
+      ([visualize.py](spine_segmentation/evaluation/visualize.py)). El
+      multiclass sigue usandose internamente para label transfer (nombres
+      Tn-Lm en las cajas verdes) y para el tab "Vertebrae Segmentation" —
+      no se ve mas su numero crudo en la UI principal. El multi-fallback
+      cuando binary FALLA totalmente se conserva (alli si es el unico
+      signal valido).
+- [x] **Fix N — i18n module + toggle ES/EN** (Nivel B confirmado por
+      Elvis: Diagnosis Results + Header markdown, default Español).
+      Nuevo modulo [`i18n.py`](spine_segmentation/deployment/i18n.py)
+      con `DIAGNOSIS_STRINGS` (ES + EN dicts) + `MARKDOWN_HEADER` +
+      helpers `t(key, lang)` / `header_markdown(lang)` /
+      `label_to_lang(label)`. `build_results_text(..., language='es')`
+      lee strings via `t()`. `predict()` acepta `language_label`. UI
+      gana `gr.Radio(['Español', 'English'], value='Español')` arriba de
+      todo. `language_radio.change` actualiza el markdown header en
+      vivo; el diagnosis text se re-traduce en el siguiente Analyze (10s
+      de inferencia justo para retraducir strings fijos seria
+      wasteful).
+- [x] Texto del ROTATION WARNING actualizado: ahora apunta al "rotation
+      slider to straighten the image" (la solucion real del 5.5/5.6) en
+      vez del "trust the multiclass measurement" obsoleto.
+- [x] 8 tests nuevos (suite: **55 passed + 1 skipped**, era 47+1). Tests
+      antiguos que asercionaban strings en ingles ahora pasan
+      `language='en'` explicito.
+- [x] Deploy via `scripts/upload_to_space.py` (3 archivos, commit
+      atomico, con `--path-in-repo` explicito — leccion del 5.5).
+- [x] Smoke remoto verde: S_22 en Español ("Curva principal", "COBERTURA",
+      "Escoliosis leve", "VERTEBRAS DETECTADAS") y en English ("Principal
+      curve", "COVERAGE", "Mild scoliosis", "VERTEBRAE DETECTED").
+      Confirmado en ambos idiomas que el bloque CROSS-CHECK NO aparece y
+      el viz NO tiene la linea Multiclass cyan.
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 17.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -590,3 +638,5 @@ Orden corto:
 | 2026-05-19 (Ciclo 5.6) | `gr.State` para imagen original + live preview en `rotation_slider.change` | Sin un state separado, el preview rotaria la imagen MOSTRADA (que a su vez fue producto del cambio anterior del slider), acumulando rotaciones. Con `gr.State` la slider rota siempre la ORIGINAL upload. `input_image.upload` (que solo fira para uploads de usuario, no para escrituras programaticas del preview) guarda la original + resetea el slider a 0. Resultado: dragging el slider de 0 → 10 → 20 rota la original por 20°, no 30°. Apreciable visualmente en <300ms. |
 | 2026-05-19 (Ciclo 5.6) | Botones de rotacion atomicos: retornan `(new_slider, rotated_image)` en un solo handler | Confiar solamente en `rotation_slider.change` para que dispare tras un update programatico no es robusto entre versiones de Gradio. Cada boton ahora calcula el nuevo slider value, rota la original por ese valor, y retorna ambos a sus respectivos outputs en un solo round-trip. Atomic widget+display update, sin race condition entre los dos. |
 | 2026-05-19 (Ciclo 5.6) | `predict()` pierde el parametro `rotation_deg` que tenia en 5.5 | El live preview hace que `input_image` al momento de Analyze ya este rotada visualmente — predict solo necesita delegar al pipeline. Mantener `rotation_deg` ademas seria riesgo de doble-rotacion (si el closure rota nuevamente lo que ya esta rotado). El helper `rotate_image_for_analysis` se queda como funcion pura, usado por `preview_rotation_for_display`. Contrato mas limpio + el regresion-pin `test_predict_callback_no_longer_takes_rotation_deg` evita volver al estado anterior. |
+| 2026-05-19 (Ciclo 5.7) | Quitar el bloque `=== CROSS-CHECK binary vs multiclass ===` del frontend | Elvis cito: "no le aporta al usuario y lo termina confundiendo, ya por detras si el multiclass es con lo que marca o detalla la vertebra no hay problema". Los numeros del multiclass (a veces 90° degenerado por la naturaleza ruidosa del Dice 0.34 multiclass + clamp del arctan) parecian contradecir el binary, confundiendo al usuario. La info de naming (Tn-Lm) y las cajas verdes (que SI son utiles) se calculan internamente con el multiclass pero el usuario no ve sus numeros crudos. Solo cuando el binary FALLA totalmente, mostramos el multi-fallback (alli si es el unico signal). |
+| 2026-05-19 (Ciclo 5.7) | i18n via dict en `i18n.py`, default Español, Nivel B (Diagnosis Results + Header markdown) | Elvis pidio toggle ES/EN para que un evaluador anglofono pueda leer la app sin Google Translate. Default Español porque el target audience es U. Andes / Colombia. Nivel B (no Nivel C/full UI) porque Gradio no permite cambiar labels de componentes facilmente sin recrear el Blocks — los labels de tabs / slider / botones quedan en ingles (mayormente simbolos: Reset, Analyze, ↺ -90°). Patron: `t(key, lang)` con fallbacks a Español y a la key como placeholder visible. El header markdown se re-renderiza en `language_radio.change`; el diagnosis text se re-traduce en el siguiente Analyze (no se re-corre el modelo solo para retraducir strings fijos). |

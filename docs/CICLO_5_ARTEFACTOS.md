@@ -11,6 +11,7 @@
 > **Addendum 5.4** (2026-05-19): robustez ante rotación + UX de la viz Cobb. Ver sección 14.
 > **Addendum 5.5** (2026-05-19): control manual de rotación en la UI. Ver sección 15.
 > **Addendum 5.6** (2026-05-19): live preview de la rotación. Ver sección 16.
+> **Addendum 5.7** (2026-05-19): limpieza multiclass del frontend + toggle ES/EN. Ver sección 17.
 
 ---
 
@@ -898,3 +899,171 @@ manualmente en browser:
   apareciendo solo después de Analyze. Eso es por diseño — la
   segmentación es el cómputo caro (10s). El preview solo afecta la
   decisión "¿cuánto rotar?", no "¿cuál es el diagnóstico?".
+
+---
+
+## 17. Addendum 5.7 — Limpieza multiclass del frontend + toggle ES/EN
+
+> **Fecha:** 2026-05-19.
+> **Motivación:** Tras probar el live preview del 5.6, Elvis identificó
+> dos issues simultáneos:
+> 1. "La info del multiclass no es bueno que aparezca al final, el
+>    binary es el que tiene mayor peso... no le aporta al usuario y lo
+>    termina confundiendo". El bloque `=== CROSS-CHECK ===` mostraba
+>    "Multiclass: 90.0 deg" (a menudo degenerado por el clamp del arctan
+>    sobre el multiclass ruidoso, Dice 0.34) al lado del binary
+>    coherente (e.g., 4.2°). Sin contexto algorítmico, parecían
+>    contradictorios.
+> 2. La UI era inconsistente: el reporte estaba en español ("Curva
+>    principal", "convexidad derecha") pero el header markdown y los
+>    tabs en inglés. Solicitó toggle ES/EN para usuarios de ambos
+>    idiomas.
+
+### Parte 1 — Multiclass cleanup del frontend (Fix M)
+
+**Eliminado de la UI** (sin perder funcionalidad backstage):
+
+- `build_results_text` ya no emite el bloque `=== CROSS-CHECK binary vs
+  multiclass ===` (con sus 3 líneas Binary/Multiclass/CONCORDANCIA).
+- `draw_cobb_angle_visualization` ya no dibuja la línea cyan
+  "Multiclass (illustration only): X.X deg" en el header.
+
+**Conservado** (uso interno del multiclass):
+
+- `assign_vertebra_names_to_curves`: el label transfer Tn-Lm para
+  nombrar end vertebrae de las curvas binary sigue funcionando
+  silenciosamente.
+- Cajas verdes en end vertebrae: se siguen dibujando con datos del
+  multiclass mask.
+- Lista `=== VERTEBRAS DETECTADAS ===` (en ES) / `=== VERTEBRAE
+  DETECTED ===` (en EN): se mantiene — informa cuántas vértebras
+  individuales detectó el modelo.
+- Tab "Vertebrae Segmentation": viewer del multiclass mask coloreado,
+  útil educativamente, intacto.
+- Multi-fallback line: cuando el binary FALLA totalmente (e.g., empty
+  mask), el multiclass se vuelve a mostrar como `Multiclass method
+  (fallback): X.X deg` porque allí sí es la única señal disponible.
+
+### Parte 2 — i18n module + toggle ES/EN (Fix N, Nivel B)
+
+**Nuevo módulo** `spine_segmentation/deployment/i18n.py`:
+
+```python
+DEFAULT_LANG = "es"  # default audience = U. Andes / Colombia
+DIAGNOSIS_STRINGS = {"es": {...}, "en": {...}}     # all UI strings
+MARKDOWN_HEADER  = {"es": "...", "en": "..."}      # top-of-page intro
+
+def t(key, lang="es"): ...
+def header_markdown(lang="es"): ...
+def label_to_lang(label): ...  # "Español"/"English" -> "es"/"en"
+```
+
+`t()` cae a Español si el lang es desconocido y al key si la clave no
+existe (placeholder visible para regresiones de traducción durante
+desarrollo).
+
+**Refactor `build_results_text`**:
+
+- Nuevo parámetro `language: str = "es"`.
+- TODOS los strings de UI ahora vienen de `t(key, lang)`: `cobb_block_
+  header_curves`, `principal_label`, `convex_right/left/neutral/unknown`,
+  `binary_method`, `binary_no_curves`, `multi_fallback_prefix`,
+  `coverage_header`, `coverage_covers`, `coverage_of`,
+  `coverage_vertebrae_word`, `warning_lower_spine_prefix`,
+  `warning_not_segmented_suffix`, `warning_partial_generic`,
+  `rotation_header`, `rotation_line_{1,2,3}`,
+  `assessment_header_{principal,binary,fallback}`,
+  `assessment_{normal,mild,moderate,severe,inconclusive}`,
+  `curves_total_prefix`, `shape_{double,triple,n_curves}`,
+  `vertebrae_header_prefix`.
+
+**UI (Gradio)**:
+
+```python
+language_radio = gr.Radio(
+    choices=["Español", "English"],
+    value="Español",
+    label="Idioma / Language",
+    interactive=True,
+)
+header_md = gr.Markdown(header_markdown(DEFAULT_LANG))
+# ...
+predict_btn.click(predict, [input_image, language_radio], [...])
+language_radio.change(
+    fn=lambda lbl: header_markdown(label_to_lang(lbl)),
+    inputs=[language_radio],
+    outputs=[header_md],
+)
+```
+
+El header markdown se re-renderiza al instante al togglear. El reporte
+de diagnóstico se re-traduce cuando el usuario presiona Analyze otra
+vez (no se re-ejecuta el modelo solo para retraducir).
+
+**Texto del ROTATION WARNING actualizado**: la línea final ahora dice
+"Re-capture with the patient straight, or use the rotation slider to
+straighten the image" (en lugar del obsoleto "trust the multiclass
+measurement" que describía el path de auto-rotación que abandonamos en
+el 5.5).
+
+### Tests añadidos (Ciclo 5.7)
+
+1. `test_t_returns_spanish_by_default` — sin lang, ES.
+2. `test_t_returns_english_when_lang_is_en` — `lang='en'`, EN.
+3. `test_t_falls_back_to_key_when_key_missing` — key returned visible.
+4. `test_t_falls_back_to_spanish_when_lang_unknown` — defensa.
+5. `test_label_to_lang_maps_radio_choices` — labels Gradio → códigos.
+6. `test_build_results_text_renders_in_spanish` — verifica strings ES.
+7. `test_build_results_text_renders_in_english` — verifica strings EN.
+8. `test_header_markdown_has_both_languages` — sanity de ambos blocks.
+
+Además, los 6 tests de Ciclos previos que asercionaban strings en
+inglés (e.g. "Mild scoliosis", "CONCORDANCIA") ahora pasan
+`language='en'` explícito o `language='es'` según corresponda — la
+intención original se preserva.
+
+Y el test `test_build_results_text_includes_concordance_when_both_succeed`
+del 5.5 se transformó a `test_build_results_text_no_longer_emits_cross_check_block`
+(regression pin de Fix M).
+
+Suite final: **55 passed + 1 skipped** (era 47 + 1).
+
+### Smoke remoto (gradio_client) — verificación bilingüe
+
+| Test | Resultado |
+|---|---|
+| API signature | `input_image` + `language_label: enum["Español","English"]` ✓ |
+| S_22 con `language="Español"` | "ANGULO COBB", "Curva principal: 19.5 deg", "COBERTURA", "Escoliosis leve", "VERTEBRAS DETECTADAS" ✓ |
+| S_22 con `language="English"` | "COBB ANGLE", "Principal curve: 19.5 deg", "COVERAGE", "Mild scoliosis", "VERTEBRAE DETECTED" ✓ |
+| Ningún output contiene "CROSS-CHECK" | ✓ |
+| Ningún output contiene "Multiclass:" en ambos idiomas | ✓ |
+
+### Commits del Ciclo 5.7
+
+- `0d344f3` refactor(app,viz): remove multiclass cross-check from user-facing UI
+- `28872b8` feat(app): add i18n module + ES/EN language toggle for diagnosis results
+- `<este>` docs(cycle5): close cycle 5.7 — multiclass UI cleanup + bilingual report
+
+### Limitaciones honestas
+
+- **Tabs / slider / botones rápidos siguen en inglés**. Cambiar labels
+  de componentes Gradio dinámicamente requiere recrear el Blocks. Para
+  símbolos universales (Reset, Analyze, ↺ -90°, "Binary Segmentation")
+  el valor de traducir no justifica la complejidad. Si surge necesidad,
+  promover a Ciclo 6 con full UI re-render.
+- **El reporte no se re-traduce automáticamente al togglear el
+  idioma** — el usuario debe presionar Analyze otra vez. Es por diseño:
+  el modelo cuesta 10s en CPU; ejecutarlo solo para retraducir strings
+  fijos sería desperdicio. El header markdown sí cambia instantáneamente
+  porque es texto fijo sin cómputo.
+- **Default Español puede sorprender** a un evaluador anglófono que
+  abre el Space por primera vez. Mitigación: el radio "Idioma /
+  Language" es bilingüe, visible al tope, y un click resuelve.
+- **i18n basado en dict no es escalable** a más de 2-3 idiomas. Para
+  expansión futura, considerar `gettext` o un sistema de archivos `.po`
+  por idioma. Para 2 idiomas el dict es lo más simple y mantenible.
+- **Multi-fallback line cuando binary FALLA** se conserva. Si en
+  producción aparecen casos donde el binary falla pero el multiclass
+  reporta un Cobb decente, el usuario sí ve un número multiclass — pero
+  con el prefijo "fallback" claro y el binary marcado como ERROR, no
+  como contradicción.
