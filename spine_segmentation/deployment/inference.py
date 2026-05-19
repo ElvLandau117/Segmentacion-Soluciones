@@ -23,6 +23,7 @@ from spine_segmentation.evaluation.cobb_angle import (
     cobb_from_binary,
     cobb_from_multiclass,
 )
+from spine_segmentation.evaluation.coverage import compute_coverage_info
 from spine_segmentation.postprocessing.vertebra_ordering import (
     compute_endplate_angles,
     extract_vertebra_info,
@@ -98,6 +99,7 @@ class SpineSegmentationPipeline:
             "cobb_multiclass": None,
             "vertebrae_detected": [],
             "cobb_visualization": None,
+            "coverage_info": None,
         }
 
         # Preprocess
@@ -128,7 +130,12 @@ class SpineSegmentationPipeline:
             cobb_result = cobb_from_binary(binary_mask)
             results["cobb_binary"] = cobb_result
 
-        # Multiclass prediction
+        # Multiclass prediction.
+        # `vertebrae` is also consumed by the coverage analysis (Ciclo 5.3),
+        # so we keep it accessible outside the conditional. When there is no
+        # multiclass model it stays as an empty list and coverage degrades
+        # gracefully (no upper/lower vertebra names, just a ratio).
+        vertebrae: list = []
         if self.multiclass_model is not None:
             with torch.no_grad():
                 with torch.amp.autocast("cuda", enabled=(self.device == "cuda")):
@@ -147,6 +154,11 @@ class SpineSegmentationPipeline:
             results["cobb_multiclass"] = cobb_result
             results["vertebrae_detected"] = cobb_result.get("vertebrae_detected", [])
 
+            # Extract vertebra info once — needed for both label transfer
+            # (Ciclo 5.2) and coverage analysis (Ciclo 5.3 fix F).
+            vertebrae = extract_vertebra_info(multi_mask, self.class_names)
+            vertebrae = compute_endplate_angles(vertebrae)
+
             # Cycle 5.2: enrich every binary-detected curve with vertebra names
             # using the multiclass detection (label transfer). The multiclass
             # mask is noisy for Cobb computation but useful for NAMING.
@@ -154,11 +166,20 @@ class SpineSegmentationPipeline:
                 results.get("cobb_binary")
                 and results["cobb_binary"].get("curves")
             ):
-                vertebrae = extract_vertebra_info(multi_mask, self.class_names)
-                vertebrae = compute_endplate_angles(vertebrae)
                 assign_vertebra_names_to_curves(
                     results["cobb_binary"]["curves"], vertebrae
                 )
+
+        # Ciclo 5.3 fix F: compute how much of the spine the binary mask
+        # actually covered. The UI uses this to warn the user when "0 deg"
+        # might really mean "we missed half the spine".
+        binary_mask = results.get("binary_mask")
+        if binary_mask is not None:
+            results["coverage_info"] = compute_coverage_info(
+                binary_mask=binary_mask,
+                multiclass_vertebrae=vertebrae,
+                image_height=self.image_size,
+            )
 
         # Create Cobb angle visualization
         results["cobb_visualization"] = self._create_cobb_visualization(results, image_resized)

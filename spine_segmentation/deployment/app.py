@@ -25,6 +25,7 @@ def build_results_text(
     cobb_binary: dict | None,
     cobb_multiclass: dict | None,
     vertebrae_detected: list | None = None,
+    coverage_info: dict | None = None,
 ) -> str:
     """Render the multi-line Diagnosis Results panel with multi-curve support.
 
@@ -36,6 +37,11 @@ def build_results_text(
     lists every detected curve (principal, secondary, ...) with its direction
     and the vertebrae closest to its inflection points. When "curves" is
     missing or empty, the layout degrades to the single-curve Ciclo 5 format.
+
+    When `coverage_info` is supplied and reports partial coverage (Ciclo 5.3
+    fix F), a COVERAGE block is emitted and the Assessment switches to
+    "inconclusive" when the Cobb reading is ~0 — that way a partial mask
+    cannot be misread as "Normal".
 
     Layout (sections omitted when the corresponding data is missing):
 
@@ -49,8 +55,12 @@ def build_results_text(
         Multiclass:          MM.M deg  (anatomical reference, illustration only)
         Concordancia: <High agreement | Review | Significant discrepancy>
 
+      === COVERAGE ===                              # Ciclo 5.3, only when partial
+      Binary mask covers: C6 - T10  (12 of ~22 vertebrae, ~55%)
+      WARNING: Lower spine (T11-L5) NOT segmented — Cobb angle may be misleading.
+
       === ASSESSMENT (curva mayor) ===
-      <Normal/Mild/Moderate/Severe>
+      <Normal/Mild/Moderate/Severe | Inconclusive — insufficient coverage>
       Numero total de curvas detectadas: N (S-curve / triple-curve / ...)
 
       === VERTEBRAE DETECTED (N) ===
@@ -130,6 +140,52 @@ def build_results_text(
             f"Multiclass method: ERROR - {cobb_multiclass.get('error', 'unknown')}"
         )
 
+    # ---------------------------------------------------------------- COVERAGE
+    # Ciclo 5.3 fix F: when the binary mask covered only part of the spine,
+    # surface that explicitly so a "0 deg" reading is not mistaken for a
+    # healthy spine. Block is emitted only when coverage_info marks the
+    # segmentation as partial; full coverage stays silent (less UI noise).
+    coverage_is_partial = bool(
+        coverage_info
+        and coverage_info.get("success")
+        and coverage_info.get("is_partial")
+    )
+    if coverage_is_partial:
+        upper_v = coverage_info.get("upper_vertebra")
+        lower_v = coverage_info.get("lower_vertebra")
+        n_v = coverage_info.get("n_vertebrae", 0)
+        n_exp = coverage_info.get("n_expected", 22)
+        ratio_pct = (coverage_info.get("coverage_ratio") or 0.0) * 100.0
+        lines.append("\n=== COVERAGE ===")
+        if upper_v and lower_v:
+            lines.append(
+                f"Binary mask covers: {upper_v} - {lower_v}  "
+                f"({n_v} of ~{n_exp} vertebrae, ~{ratio_pct:.0f}%)"
+            )
+        else:
+            lines.append(
+                f"Binary mask covers ~{ratio_pct:.0f}% of image height "
+                "(no multiclass vertebrae to name the range)"
+            )
+        below = coverage_info.get("vertebrae_below_range") or []
+        above = coverage_info.get("vertebrae_above_range") or []
+        if below:
+            rng = f"{below[0]}-{below[-1]}" if len(below) > 1 else below[0]
+            lines.append(
+                f"WARNING: Lower spine ({rng}) NOT segmented — "
+                "Cobb angle may be misleading."
+            )
+        elif above:
+            rng = f"{above[0]}-{above[-1]}" if len(above) > 1 else above[0]
+            lines.append(
+                f"WARNING: Upper spine ({rng}) NOT segmented — "
+                "Cobb angle may be misleading."
+            )
+        else:
+            lines.append(
+                "WARNING: Partial spine coverage — Cobb angle may be misleading."
+            )
+
     # -------------------------------------------------------------- ASSESSMENT
     # Severity uses the LARGEST curve detected by the binary method. The
     # binary method is the source of truth on our data (MAE 23 deg, r=0.66,
@@ -144,7 +200,15 @@ def build_results_text(
 
     if assessment_source is not None:
         source_label, angle = assessment_source
-        if angle < 10:
+        # Ciclo 5.3 fix F: if coverage is partial AND the angle is ~0, the
+        # binary likely missed enough spine that "Normal" would be misleading.
+        # Flag it as inconclusive so the user knows to investigate instead.
+        if coverage_is_partial and angle < 1.0:
+            assessment = (
+                "Inconclusive - insufficient binary coverage to compute Cobb. "
+                "Review segmentation before interpreting."
+            )
+        elif angle < 10:
             assessment = "Normal (< 10 degrees)"
         elif angle < 25:
             assessment = "Mild scoliosis (10-25 degrees)"
@@ -231,6 +295,7 @@ def create_app(
             cobb_binary=results.get("cobb_binary"),
             cobb_multiclass=results.get("cobb_multiclass"),
             vertebrae_detected=results.get("vertebrae_detected"),
+            coverage_info=results.get("coverage_info"),
         )
 
         # Generate explainability panel

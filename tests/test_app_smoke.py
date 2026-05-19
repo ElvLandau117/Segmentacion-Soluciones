@@ -388,6 +388,183 @@ def test_build_results_text_multi_curve_layout():
     assert "Binary principal" in text
 
 
+# ----------------------------------------------------------------------------
+# Coverage info — Ciclo 5.3 (fix F)
+# ----------------------------------------------------------------------------
+
+def test_compute_coverage_info_reports_partial_segmentation():
+    """A binary mask that only covers the upper third of the image, paired
+    with multiclass vertebrae spread across the whole spine, must be flagged
+    as partial coverage. The upper/lower vertebrae and the vertebrae_below
+    list are what the UI uses to say 'Lower spine NOT segmented'."""
+    import numpy as np
+    from spine_segmentation.evaluation.coverage import compute_coverage_info
+
+    H, W = 512, 512
+    binary = np.zeros((H, W), dtype=np.uint8)
+    binary[50:200, 250:270] = 1  # rows 50-200 only -> ~29% coverage
+
+    # Multiclass detected vertebrae across the full spine.
+    multiclass_vertebrae = [
+        {"name": "C5", "centroid_y": 60},
+        {"name": "C6", "centroid_y": 90},
+        {"name": "C7", "centroid_y": 120},
+        {"name": "T1", "centroid_y": 150},
+        {"name": "T6", "centroid_y": 250},
+        {"name": "T12", "centroid_y": 350},
+        {"name": "L3", "centroid_y": 430},
+    ]
+
+    info = compute_coverage_info(binary, multiclass_vertebrae)
+
+    assert info["success"]
+    assert info["is_partial"] is True
+    assert abs(info["coverage_ratio"] - (199 - 50) / 512.0) < 0.01
+    # upper/lower vertebra: nearest centroid_y to top_y=50 / bottom_y=199.
+    assert info["upper_vertebra"] == "C5"
+    assert info["lower_vertebra"] == "T1"   # closest to 199 in the fixture
+    # Vertebrae in range = those with centroid_y in [50, 199].
+    assert set(info["vertebrae_in_range"]) == {"C5", "C6", "C7", "T1"}
+    # The ones the binary missed below the range — the warning consumer.
+    assert info["vertebrae_below_range"] == ["T6", "T12", "L3"]
+
+
+def test_compute_coverage_info_reports_full_segmentation():
+    """A near-full-image binary mask + plenty of multiclass vertebrae must
+    NOT be flagged as partial. This is the happy path for healthy spines."""
+    import numpy as np
+    from spine_segmentation.evaluation.coverage import compute_coverage_info
+
+    H, W = 512, 512
+    binary = np.zeros((H, W), dtype=np.uint8)
+    binary[30:490, 240:280] = 1  # ~90% coverage
+
+    multiclass_vertebrae = [
+        {"name": f"V{i}", "centroid_y": 40 + i * 20} for i in range(20)
+    ]
+
+    info = compute_coverage_info(binary, multiclass_vertebrae)
+
+    assert info["success"]
+    assert info["is_partial"] is False
+    assert info["coverage_ratio"] > 0.7
+    assert info["n_vertebrae"] >= 15
+    assert info["vertebrae_below_range"] == []
+    assert info["vertebrae_above_range"] == []
+
+
+def test_compute_coverage_info_handles_empty_mask_and_no_vertebrae():
+    """An empty binary mask must return success=False (no crash). With a
+    valid mask but no multiclass vertebrae, upper/lower vertebra names
+    degrade to None but the coverage ratio is still computed."""
+    import numpy as np
+    from spine_segmentation.evaluation.coverage import compute_coverage_info
+
+    # Empty mask
+    empty = np.zeros((100, 100), dtype=np.uint8)
+    info_empty = compute_coverage_info(empty, multiclass_vertebrae=[])
+    assert info_empty["success"] is False
+
+    # None mask
+    info_none = compute_coverage_info(None, multiclass_vertebrae=[])
+    assert info_none["success"] is False
+
+    # Mask with content but no multiclass vertebrae available.
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    mask[10:90, 40:60] = 1
+    info_no_v = compute_coverage_info(mask, multiclass_vertebrae=[])
+    assert info_no_v["success"] is True
+    assert info_no_v["upper_vertebra"] is None
+    assert info_no_v["lower_vertebra"] is None
+    assert info_no_v["vertebrae_in_range"] == []
+
+
+def test_build_results_text_emits_coverage_warning_when_partial():
+    """When coverage_info reports partial coverage with lower vertebrae
+    missing, the rendered text must include the COVERAGE header, the
+    'C6 - T10' range, and the 'Lower spine NOT segmented' warning."""
+    from spine_segmentation.deployment.app import build_results_text
+
+    text = build_results_text(
+        cobb_binary={"success": True, "cobb_angle_deg": 0.0},
+        cobb_multiclass=None,
+        coverage_info={
+            "success": True,
+            "is_partial": True,
+            "coverage_ratio": 0.55,
+            "vertebrae_in_range": ["C6", "C7", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"],
+            "vertebrae_below_range": ["T11", "T12", "L1", "L2", "L3", "L4", "L5"],
+            "vertebrae_above_range": [],
+            "n_vertebrae": 12,
+            "n_expected": 22,
+            "upper_vertebra": "C6",
+            "lower_vertebra": "T10",
+        },
+    )
+
+    assert "=== COVERAGE ===" in text
+    assert "C6 - T10" in text
+    assert "12 of ~22" in text
+    assert "~55%" in text
+    assert "WARNING" in text
+    assert "Lower spine" in text
+    assert "T11-L5" in text
+
+
+def test_build_results_text_no_coverage_warning_when_full():
+    """When coverage is full (is_partial=False), the COVERAGE block and
+    WARNING line must NOT appear — the UI stays uncluttered for healthy
+    cases."""
+    from spine_segmentation.deployment.app import build_results_text
+
+    text = build_results_text(
+        cobb_binary={"success": True, "cobb_angle_deg": 5.0},
+        cobb_multiclass=None,
+        coverage_info={
+            "success": True,
+            "is_partial": False,
+            "coverage_ratio": 0.93,
+            "n_vertebrae": 20,
+            "upper_vertebra": "C3",
+            "lower_vertebra": "L5",
+            "vertebrae_below_range": [],
+            "vertebrae_above_range": [],
+        },
+    )
+
+    assert "=== COVERAGE ===" not in text
+    assert "WARNING" not in text
+    assert "Lower spine" not in text
+
+
+def test_build_results_text_says_inconclusive_when_zero_cobb_and_partial():
+    """The most important regression for Ciclo 5.3: a zero Cobb on a partial
+    binary mask must NOT be reported as 'Normal'. The previous behavior
+    silently labelled S_22-style cases as Normal because cobb=0. After the
+    fix, the Assessment is 'Inconclusive — insufficient coverage'."""
+    from spine_segmentation.deployment.app import build_results_text
+
+    text = build_results_text(
+        cobb_binary={"success": True, "cobb_angle_deg": 0.0},
+        cobb_multiclass=None,
+        coverage_info={
+            "success": True,
+            "is_partial": True,
+            "coverage_ratio": 0.4,
+            "vertebrae_in_range": ["C6", "C7", "T1", "T2"],
+            "vertebrae_below_range": ["L1", "L5"],
+            "vertebrae_above_range": [],
+            "n_vertebrae": 4,
+            "upper_vertebra": "C6",
+            "lower_vertebra": "T2",
+        },
+    )
+
+    assert "Inconclusive" in text
+    assert "Normal" not in text
+    assert "ASSESSMENT" in text
+
+
 def test_draw_cobb_visualization_multi_curve_uses_two_colors():
     """When 2 curves are supplied, the visualization must use BOTH the
     principal red (255, 0, 0) and the secondary magenta (255, 100, 200).
