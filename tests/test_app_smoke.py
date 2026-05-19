@@ -245,6 +245,79 @@ def test_binary_overlay_renders_spline_and_inflection_points():
 
 
 # ----------------------------------------------------------------------------
+# Orientation detection — Ciclo 5.4 (fix G)
+# ----------------------------------------------------------------------------
+
+def test_compute_orientation_info_detects_tilt():
+    """A skeleton along a 30 deg line from vertical must be flagged as tilted.
+    This is the key behaviour for N_61 (Normal radiograph rotated in frame
+    that fooled cobb_from_binary into reporting 4 phantom curves)."""
+    import numpy as np
+    from spine_segmentation.evaluation.orientation import (
+        compute_orientation_info,
+    )
+
+    # Build skeleton points along a line tilted 30 deg from vertical.
+    # In image coords with y-down, "tilted 30 deg" means dx/dy = tan(30).
+    # For y in [0, 400], x = 250 + tan(30deg) * (y - 200).
+    n = 100
+    ys = np.linspace(0, 400, n)
+    xs = 250.0 + np.tan(np.radians(30.0)) * (ys - 200)
+    pts = np.column_stack([xs, ys])
+
+    info = compute_orientation_info(pts)
+    assert info["success"] is True
+    assert info["is_tilted"] is True
+    # SVD principal axis vs vertical -> ~30 deg. Allow 2 deg slack for
+    # numerical / discretisation noise.
+    assert abs(info["tilt_abs_deg"] - 30.0) < 2.0
+    assert info["n_points"] == n
+
+
+def test_compute_orientation_info_vertical_spine():
+    """A perfectly vertical skeleton must NOT be flagged as tilted. Small
+    horizontal jitter (real spines wobble a few px) is still vertical."""
+    import numpy as np
+    from spine_segmentation.evaluation.orientation import (
+        compute_orientation_info,
+    )
+
+    n = 100
+    ys = np.linspace(0, 400, n)
+    # Jitter of +/- 1 px in x — well within "vertical".
+    rng = np.random.default_rng(seed=42)
+    xs = 250.0 + rng.uniform(-1.0, 1.0, size=n)
+    pts = np.column_stack([xs, ys])
+
+    info = compute_orientation_info(pts)
+    assert info["success"] is True
+    assert info["is_tilted"] is False
+    assert info["tilt_abs_deg"] < 2.0
+
+
+def test_compute_orientation_info_handles_empty_or_collinear():
+    """Robustness: None input, empty array, or <3 points must NOT crash and
+    must return success=False so callers can skip the warning gracefully."""
+    import numpy as np
+    from spine_segmentation.evaluation.orientation import (
+        compute_orientation_info,
+    )
+
+    # None
+    assert compute_orientation_info(None)["success"] is False
+
+    # Empty
+    assert compute_orientation_info(np.zeros((0, 2)))["success"] is False
+
+    # 2 points (insufficient)
+    assert compute_orientation_info(np.array([[10, 20], [30, 40]]))["success"] is False
+
+    # Degenerate: 5 identical points (zero spread)
+    same = np.tile(np.array([[100, 100]], dtype=float), (5, 1))
+    assert compute_orientation_info(same)["success"] is False
+
+
+# ----------------------------------------------------------------------------
 # Binary mask cleanup — Ciclo 5.3 (fix B)
 # ----------------------------------------------------------------------------
 
