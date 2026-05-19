@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -249,6 +249,57 @@ dos curvas. Cuello de botella = cobertura, no severidad ni algoritmo.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 13.
 
+### Ciclo 5.4 ✅ COMPLETO — Robustez ante rotacion + UX de la viz Cobb
+Smoke manual del Space (post 5.3) revelo 3 issues nuevos: (a) imagenes
+rotadas como `N_61.jpg` generaban hasta 4 curvas fantasma porque el spline
+`x = f(y)` interpreta la rotacion como inflexiones; (b) los rotulos
+`[Principal/Secundaria] Superior/Inferior (Vn)` quedaban encimados cuando 2
+curvas compartian vertebra; (c) curvas degeneradas con
+`upper_vertebra == lower_vertebra` (e.g. "5.9° T9-T9" en S_22) pasaban el
+filtro `min_curve_deg` y confundian al usuario.
+
+- [x] **Fix G — Deteccion de rotacion via SVD** ([orientation.py nuevo](spine_segmentation/evaluation/orientation.py)):
+      `compute_orientation_info(skeleton_points)` aplica SVD sobre el
+      point-cloud del skeleton centrado. El primer singular vector es el
+      eje principal; su angulo vs vertical = tilt_deg. `is_tilted` se
+      activa cuando `abs(tilt) > 12°`. Sin nuevas dependencias
+      (`numpy.linalg.svd`). Integrado en [inference.py](spine_segmentation/deployment/inference.py)
+      via `extract_spine_skeleton` + `get_skeleton_points` sobre el binary
+      mask ya limpio.
+- [x] **Bloque `=== ROTATION WARNING ===`** en `build_results_text`
+      ([app.py](spine_segmentation/deployment/app.py)). Decision UX: el
+      Cobb binary se sigue mostrando (no se hide); el medico ve el numero
+      y el aviso lado a lado y decide.
+- [x] **Fix H — Filtrado de curvas degeneradas** ([cobb_angle.py](spine_segmentation/evaluation/cobb_angle.py)):
+      (i) Nueva constante `MIN_IP_Y_DISTANCE_PX = 30` filtra pares de
+      inflection points cuya y-distance en el grid del spline (500 pts) es
+      sub-vertebral. (ii) `assign_vertebra_names_to_curves` elimina
+      curvas con `upper == lower` despues del label transfer (no marca,
+      elimina), y reindexa `rank` para preservar el orden principal/
+      secundaria. (iii) [inference.py](spine_segmentation/deployment/inference.py)
+      resyncroniza `cobb_angle_deg` / `inflection_points` con la nueva
+      principal si el filtro corrio.
+- [x] **Fix I — Dedup + anti-overlap de rotulos** ([visualize.py](spine_segmentation/evaluation/visualize.py)):
+      Nuevo `_rects_overlap(a, b)` helper. `_draw_single_cobb_curve`
+      acepta acumuladores `labeled_vertebrae: set` y
+      `placed_label_rects: list`. Si una vertebra ya tiene rotulo de una
+      curva previa (e.g. T9 = lower principal + upper secundaria), se
+      omite el texto duplicado (la geometria — boxes, perpendiculares,
+      arco — sigue dibujada). Si el rotulo colisionaria con uno previo,
+      se desplaza verticalmente en pasos de 16 px hasta encajar.
+      `draw_cobb_angle_visualization` instancia los acumuladores una vez
+      y los threadea entre los `_draw_single_cobb_curve` calls.
+- [x] 9 tests nuevos (suite: **41 passed + 1 skipped**, era 32+1).
+- [x] Deploy via `scripts/upload_to_space.py` (5 archivos, commit atomico).
+- [x] Smoke remoto verde sobre 10 casos (los 9 del Ciclo 5.3 + N_61):
+      **N_61** baja de 4 curvas fantasma a 1 + ROTATION WARNING visible.
+      **S_22** pierde la degenerada T9-T9 y queda con 1 sola curva
+      principal limpia. S_100 mantiene 2 curvas con warning borderline
+      (tilt 12.6°, justo sobre el umbral); diagnostico clinico no
+      cambia (Severe scoliosis).
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 14.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -448,3 +499,7 @@ Orden corto:
 | 2026-05-19 (Ciclo 5.3) | Multi-pass adaptativo en `cobb_from_binary` (smoothing usuario + retry con smoothing*3.3 si solo 1 curva) | El sweep contra el dataset mostro que NO existe un solo `smoothing_factor` que funcione para todos los casos: S_22 (S-shape sutil + coverage parcial) necesita smoothing bajo (~1500) para que el spline conserve las inflexiones; S_100 (S-shape severa, principal 84° + lumbar 65°) necesita smoothing alto (~5000) para que el spline no fusione las dos curvas. Solucion: refactor a `_cobb_from_binary_single_pass` + envoltorio que corre la pasada del usuario primero y reintenta con higher smoothing cuando encuentra exactamente 1 curva. Costo computacional cero en casos triviales (0 curvas) o ya-multi-curva (≥2 curvas). Preserva el comportamiento de Ciclo 5.2 en S_100 sin perder la sensibilidad nueva en S_22. |
 | 2026-05-19 (Ciclo 5.3) | `compute_coverage_info` como modulo aparte (`evaluation/coverage.py`) y no dentro de `morphology.py` | La cobertura combina datos del binary (y-range, ratio) con la info anatomica del multiclass (nombres de vertebrae). No es estrictamente una operacion morfologica — es analisis del resultado de la segmentacion + label-transfer. Vive junto a `cobb_angle.py` porque son del mismo nivel conceptual (evaluation/) y comparten consumidor (build_results_text). El helper retorna `vertebrae_in_range`, `vertebrae_below_range`, `vertebrae_above_range` para que la UI pueda escribir "Lower spine (T11-L5) NOT segmented" en vez de un warning generico. |
 | 2026-05-19 (Ciclo 5.3) | Assessment "Inconclusive - insufficient coverage" cuando partial + 0° | El bug original era que con `coverage_ratio < 0.7` y `cobb_angle_deg = 0`, el Assessment decia "Normal (< 10 degrees)" — falso negativo clinico. La nueva rama lo flag-ea como inconcluyente para que el medico revise la segmentacion antes de confiar en el numero. La rama solo se dispara con AMBAS condiciones (partial + ~0°) para no contaminar casos sanos verdaderos (N_1: coverage full + 0° -> sigue siendo "Normal"). |
+| 2026-05-19 (Ciclo 5.4) | Deteccion de rotacion via SVD del skeleton + ROTATION WARNING en UI (Cobb binary tal cual) | `cobb_from_binary` ajusta un spline `x = f(y)` que asume columna vertical. N_61 (radiografia Normal rotada) producia 4 curvas fantasma 31.8°+20°+17.1°+14.1° cuando el multiclass — rotation-invariant por construir endplate angles per-vertebra — reportaba 0.6° correcto. SVD sobre los skeleton points (centrados) da el eje principal; su angulo vs vertical es la tilt magnitude. Threshold 12° (clinico: filtra jitter de captura, dispara con rotacion clara). Decision UX: el Cobb binary se sigue mostrando, NO se hide ni se cambia el Assessment. El medico ve el dato y el warning lado a lado y decide. |
+| 2026-05-19 (Ciclo 5.4) | `MIN_IP_Y_DISTANCE_PX = 30` para filtrar pares de inflection points sub-vertebrales | El sweep del Ciclo 5.3 dejaba pasar curvas con IPs separadas <30 pts en el grid del spline (500-pt span). Esos pares producian Cobb numericamente valido (>min_curve_deg) pero anatomicamente espurios — la wiggle del spline sub-vertebra. En S_22 esto generaba "5.9° T9-T9" como secundaria espuria. 30 pts ~= 6% del alto, ~= 1 vertebra a 512x512. Curvas mas cortas se filtran como spline noise. |
+| 2026-05-19 (Ciclo 5.4) | Eliminar (no marcar) curvas con `upper_vertebra == lower_vertebra` despues del label transfer | El filtro y-distance pasa la mayoria de los espurios, pero el label transfer nearest-y puede aun colapsar 2 IPs distintos al mismo centroide multiclass si la deteccion multiclass es poco densa en esa zona. Resultado: "T9-T9" como nombre cuando T9 es la unica vertebra cercana en y. Eliminar in-place + reindexar `rank` (en `assign_vertebra_names_to_curves`) + resync `cobb_angle_deg`/`inflection_points` en inference.py si la principal fue eliminada. Curvas con names == None (sin multiclass) NO se filtran — todavia llevan info geometrica util. |
+| 2026-05-19 (Ciclo 5.4) | Dedup de rotulos por nombre de vertebra + anti-overlap por desplazamiento vertical | Cuando 2 curvas comparten vertebra (T9 = lower principal + upper secundaria), el codigo previo dibujaba 4 textos `[Principal] Inferior (T9)`, `[Secundaria] Superior (T9)`, etc. en el mismo `text_y`, produciendo una pared ilegible. Solucion en 2 capas: (1) dedup por `v["name"]` — si ya hay rotulo de una curva anterior, omitir; la geometria (boxes/perps/arco) sigue dibujada. (2) Si el rotulo nuevo colisionaria con un rect placed, desplazar `text_y` 16px abajo iterativamente hasta encajar o salir del frame. Acumuladores `labeled_vertebrae: set` y `placed_label_rects: list` se instancian en `draw_cobb_angle_visualization` y se pasan al helper por cada curva. |

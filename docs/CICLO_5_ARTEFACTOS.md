@@ -8,6 +8,7 @@
 > **Addendum 5.1** (mismo día): polish de la visualización del Cobb. Ver sección 11.
 > **Addendum 5.2** (mismo día): detección multi-curva (rotoescoliosis). Ver sección 12.
 > **Addendum 5.3** (2026-05-19): cobertura del binary + UX informativa. Ver sección 13.
+> **Addendum 5.4** (2026-05-19): robustez ante rotación + UX de la viz Cobb. Ver sección 14.
 
 ---
 
@@ -530,3 +531,123 @@ relevante (todas las escoliosis siguen siendo escoliosis).
   zona, ningún umbral ni cierre morfológico la recuperará — esa es la
   frontera natural del Ciclo 6 (fallback multiclass, fix E, o reentrenar
   con augmentation lumbar agresivo).
+
+---
+
+## 14. Addendum 5.4 — Robustez ante rotación + UX de la viz Cobb
+
+> **Fecha:** 2026-05-19.
+> **Motivación:** Smoke manual del Space tras el cierre del 5.3 reveló 3
+> issues nuevos que el 5.3 no anticipó:
+> 1. **N_61** (Normal del dataset, rotada en frame) producía 4 curvas
+>    fantasma (31.8° + 20° + 17.1° + 14.1°) clasificada como "Moderate
+>    scoliosis", mientras el multiclass reportaba 0.6° correcto.
+> 2. **S_22**: los rótulos `[Principal/Secundaria] Superior/Inferior (Tn)`
+>    aparecían ilegiblemente encimados en la viz cuando 2 curvas
+>    compartían vértebra (T9 = lower principal + upper secundaria).
+> 3. **S_22**: la curva secundaria reportada como "5.9° T9-T9" — upper
+>    y lower iguales, degenerada geométricamente.
+
+### Diagnóstico
+
+1. **Rotación**: `_cobb_from_binary_single_pass` ajusta un spline
+   `x = f(y)` sobre los skeleton points. Una columna inclinada en el
+   frame traza una **curva** en x(y) aunque sea anatómicamente recta. El
+   segundo derivada produce zero-crossings espurios → "curvas" que son
+   artefactos de la rotación de captura. **No existía** detección de
+   orientación en el repo.
+2. **Rótulos encimados**: `_draw_single_cobb_curve` calculaba
+   `text_y = (min_row + max_row) // 2` independiente para cada rótulo,
+   sin colisión ni dedup. Cuando 2 curvas compartían vértebra los 4
+   textos aterrizaban en el mismo pixel.
+3. **Curvas degeneradas**: `_cobb_from_binary_single_pass` filtraba solo
+   por `angle < min_curve_deg = 2°`; no había umbral de y-distancia entre
+   IPs adyacentes, ni chequeo de `upper == lower` en label transfer.
+
+### Cambios
+
+| Fix | Archivo | Detalle |
+|---|---|---|
+| **G** Detección rotación | nuevo [`evaluation/orientation.py`](../spine_segmentation/evaluation/orientation.py) + integración en [`inference.py`](../spine_segmentation/deployment/inference.py) + [`app.py`](../spine_segmentation/deployment/app.py) | `compute_orientation_info(skeleton_points)` con SVD centrado. `tilt_deg` = ángulo del primer singular vector vs eje y. `is_tilted = abs(tilt_deg) > 12°`. Bloque `=== ROTATION WARNING ===` en `build_results_text` cuando se dispara. UX: Cobb binary sigue visible, Assessment NO se modifica (decisión Elvis). |
+| **H** Filtro degeneradas | [`cobb_angle.py`](../spine_segmentation/evaluation/cobb_angle.py) | (i) Nueva constante `MIN_IP_Y_DISTANCE_PX = 30` filtra pares IPs sub-vertebrales en `_cobb_from_binary_single_pass`. (ii) `assign_vertebra_names_to_curves` elimina in-place curvas con `upper == lower` post label transfer y reindexa `rank`. (iii) `inference.py` resyncroniza `cobb_angle_deg` / `inflection_points` si la principal fue filtrada. |
+| **I** Dedup + anti-overlap rótulos | [`visualize.py`](../spine_segmentation/evaluation/visualize.py) | Nuevo `_rects_overlap` helper. `_draw_single_cobb_curve` acepta `labeled_vertebrae: set` y `placed_label_rects: list`. Dedup por nombre de vértebra (geometría se mantiene). Si label nuevo colisiona, desplaza `text_y` 16px hasta encajar. `draw_cobb_angle_visualization` instancia y threadea los acumuladores. |
+
+### Smoke remoto (gradio_client) — 10 casos
+
+| Caso | Ciclo 5.3 | Ciclo 5.4 | Observación |
+|---|---|---|---|
+| **`N_61`** (Normal **rotada** — pivote 5.4) | 4 curvas fantasma 31.8°/20°/17.1°/14.1° "Moderate" | **1 curva 17.1° + ROTATION WARNING (tilt 13.1°)** | **FIXED — false positive desactivado, warning visible al médico ✓✓** |
+| **`S_22`** | 2 curvas: 19.5° T6-T9 + degenerada 5.9° T9-T9 + rótulos encimados | **1 curva 19.5° T6-T9** (degenerada filtrada, rótulos limpios) | **FIXED — issue UX resuelto ✓✓** |
+| `N_1` (Normal) | 0° Normal | 0° Normal (sin warning) | sin regresión ✓ |
+| `S_21` (mild) | 2 curvas 30.4°+28.9° + WARNING coverage | 2 curvas 30.4°+28.9° + WARNING coverage | sin regresión ✓ |
+| `S_100` (severa S-shape) | 2 curvas 83°+61° | 2 curvas 83°+61° + ROTATION WARNING (tilt 12.6°, borderline) | warning marginal — la columna severamente escoliótica YA está tilted; diagnóstico Severe se mantiene |
+| `S_45` | 2 curvas 61.7°+41.7° + WARNING coverage | 2 curvas 61.7°+41.7° + WARNING coverage | sin regresión ✓ |
+| `S_77` | 3 curvas 47.5°+30.9°+2.5° + WARNING coverage | 3 curvas 47.5°+30.9°+2.5° + WARNING coverage | sin regresión ✓ |
+| `S_120` | 2 curvas 63.9°+38.3° | 2 curvas 63.9°+38.3° | sin regresión ✓ |
+| `S_130` | 2 curvas 80.6°+54.3° | 2 curvas 80.6°+54.3° | sin regresión ✓ |
+| `S_150` | 3 curvas 54.9°+39.9°+6.8° | 3 curvas 54.9°+39.9°+6.8° + ROTATION WARNING (tilt 12.8°, borderline) | warning marginal análogo a S_100 |
+
+Criterio de éxito cumplido: N_61 ya no se reporta como "Moderate
+scoliosis" sin contexto; el warning de rotación explica el contexto. S_22
+muestra solo la curva real, sin degenerada T9-T9 ni rótulos encimados.
+S_100, S_45 y los demás severos no regresan en magnitudes ni en
+detección multi-curva.
+
+### Tests añadidos (Ciclo 5.4)
+
+1. `test_compute_orientation_info_detects_tilt` — Skeleton sintético 30°
+   → `is_tilted=True`, `tilt_abs_deg ≈ 30`.
+2. `test_compute_orientation_info_vertical_spine` — Skeleton casi vertical
+   → `is_tilted=False`.
+3. `test_compute_orientation_info_handles_empty_or_collinear` — None,
+   empty, <3 points, collinear → `success=False`.
+4. `test_build_results_text_emits_rotation_warning_when_tilted` — 3
+   ramas: tilted (block visible) / not tilted (absent) / None
+   (back-compat).
+5. `test_cobb_from_binary_skips_close_inflection_points` — synthetic
+   slow+fast sine → toda curva sobreviviente tiene IPs ≥ 30 px de
+   separación en y.
+6. `test_assign_vertebra_names_drops_same_vertebra_curves` — curva con
+   ambos IPs cerca de T9 → eliminada, sobreviviente reindexada a rank=1.
+7. `test_assign_vertebra_names_keeps_curves_without_multiclass` — None ==
+   None NO triggerea el filtro.
+8. `test_draw_single_cobb_curve_dedupes_shared_vertebra_label` — T9
+   compartida entre 2 curvas → segunda llamada no añade rect duplicado.
+9. `test_draw_single_cobb_curve_shifts_overlapping_labels_down` — 2
+   vértebras adyacentes con labels que colisionarían → rects finales
+   sin overlap.
+
+Suite final: **41 passed + 1 skipped** (era 32 + 1 antes del 5.4).
+
+### Commits del Ciclo 5.4
+
+- `69fff67` feat(eval): detect spine tilt from skeleton via SVD
+- `7f1a53c` feat(inference,app): surface rotation warning in diagnosis text
+- `6538dba` fix(cobb): filter degenerate curves with same upper/lower vertebra
+- `9ca4017` fix(viz): dedupe shared-vertebra labels and prevent overlap
+- `<este>` docs(cycle5): close cycle 5.4 — rotation + degenerate curve + label polish
+
+### Limitaciones honestas
+
+- **Threshold de tilt 12° es borderline en escoliosis severa**. S_100 y
+  S_150 (Cobb >50°) muestran ROTATION WARNING aunque la "rotación"
+  detectada es en realidad la inclinación intrínseca de su columna
+  patológica. El warning es técnicamente correcto (el spline ve un eje
+  tilted), pero podría confundir si el médico interpreta como
+  "diagnostico no confiable" cuando en realidad la curva es real. El
+  multiclass coincide en severo en estos casos, así que la concordancia
+  high resuelve la ambigüedad. Recalibración a 15° o 18° es candidato
+  para Ciclo 6 con más data.
+- **N_61 todavía reporta 1 curva fantasma 17.1°** post-fixes. La rotación
+  era suficiente para que el spline encontrara una inflexión que sobrevive
+  el filtro de y-distancia y el label transfer (no degenerada). El
+  WARNING explica el porqué, pero auto-de-rotar la imagen previo al
+  pipeline daría un fix más limpio. Trabajo de Ciclo 6.
+- **Dedup oculta info clínica útil**: si T8 es realmente lower de
+  principal y upper de secundaria (caso anatómico válido), el rótulo
+  "[Secundaria] Superior (T8)" se omite. La caja y la perpendicular
+  siguen dibujadas, así que el médico ve la geometría — solo el texto se
+  silencia. Trade-off aceptable: menos texto, más legible.
+- **MIN_IP_Y_DISTANCE_PX = 30 es heurístico**. Calibrado a 512×512 input.
+  Si el image_size cambia en el futuro, esta constante necesita
+  re-escalar.
