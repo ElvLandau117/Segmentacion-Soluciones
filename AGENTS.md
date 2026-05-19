@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -347,6 +347,41 @@ intervencion.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 15.
 
+### Ciclo 5.6 ✅ COMPLETO — Live preview de la rotacion en la UI
+El slider del 5.5 actualizaba un valor pero la imagen NO rotaba hasta
+presionar Analyze (10s CPU). Elvis lo planteo desde la perspectiva del
+usuario clinico: "que me muestre como queda al rotar para que pueda
+decidir como dejarla y ahi si hacer el analisis". Sin feedback visual el
+medico iteraba a ciegas, gastando 10s por intento.
+
+- [x] **Helper module-level `preview_rotation_for_display(original, deg)`**
+      ([app.py](spine_segmentation/deployment/app.py)) — delega a
+      `rotate_image_for_analysis`, retorna None cuando no hay original.
+- [x] **`gr.State(value=None)` para imagen original**. Guardado en
+      `input_image.upload` para que el slider rote SIEMPRE la original,
+      no la mostrada. Evita acumulacion de rotaciones cuando el usuario
+      arrastra el slider por valores intermedios.
+- [x] **`rotation_slider.change`**: rota original por el slider y
+      escribe en `input_image` (la mostrada). `input_image.upload` no
+      dispara cuando el preview escribe — sin event loop.
+- [x] **5 botones rapidos** ahora retornan `(new_slider, rotated_image)`
+      en una sola llamada (atomic widget+display update). Mas confiable
+      que esperar a que `slider.change` dispare tras update programatico.
+- [x] **`predict()` pierde `rotation_deg`**. Por que cuando Analyze
+      dispara, `input_image` ya esta rotada por el preview pipeline.
+      Predict solo delega al pipeline. Contrato mas limpio, cero riesgo
+      de doble-rotacion.
+- [x] **Reset button** ahora retorna `(0.0, original_unrotated)` — slider
+      vuelve a 0 Y display vuelve a la original sin rotar.
+- [x] 3 tests nuevos (suite: **47 passed + 1 skipped**, era 44+1).
+- [x] Deploy via `scripts/upload_to_space.py` con `--path-in-repo` explicito
+      (leccion del 5.5: sin esto el modulo va a basename, sobreescribiendo
+      el shim raiz).
+- [x] Smoke remoto verde: N_61, N_1, S_22 con slider=0 byte-identicos al
+      5.5. Live preview validable solo en browser (UI-only).
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 16.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -552,3 +587,6 @@ Orden corto:
 | 2026-05-19 (Ciclo 5.4) | Dedup de rotulos por nombre de vertebra + anti-overlap por desplazamiento vertical | Cuando 2 curvas comparten vertebra (T9 = lower principal + upper secundaria), el codigo previo dibujaba 4 textos `[Principal] Inferior (T9)`, `[Secundaria] Superior (T9)`, etc. en el mismo `text_y`, produciendo una pared ilegible. Solucion en 2 capas: (1) dedup por `v["name"]` — si ya hay rotulo de una curva anterior, omitir; la geometria (boxes/perps/arco) sigue dibujada. (2) Si el rotulo nuevo colisionaria con un rect placed, desplazar `text_y` 16px abajo iterativamente hasta encajar o salir del frame. Acumuladores `labeled_vertebrae: set` y `placed_label_rects: list` se instancian en `draw_cobb_angle_visualization` y se pasan al helper por cada curva. |
 | 2026-05-19 (Ciclo 5.5) | Control manual de rotacion en la UI (slider + 5 botones rapidos) en lugar de auto-rotacion | Auto-rotacion habria sido riesgosa: (a) S_100/S_150 borderline (tilt 12.6/12.8°) habrian sido rotados, posiblemente cambiando magnitudes anatomicas; (b) la convencion de signo entre `compute_orientation_info` (que usa SVD + arctan2 + wrap a (-90, 90]) y `cv2.getRotationMatrix2D` (positive=CCW) no es trivial — empiricamente confirme que `-tilt_deg` EMPEORA la rotacion en N_61, no la corrige. El control manual (slider -180..180 + 5 botones) elimina ambos problemas: el medico ve la imagen, decide si rotar, ajusta y obtiene feedback visual antes de Analyze. Generaliza ademas a rotaciones grandes (90° = radiografia atravesada) que ningun threshold automatico habria capturado. El warning del 5.4 sigue activo como guia post-rotacion ("you rotated, still tilted X°"). |
 | 2026-05-19 (Ciclo 5.5) | Helper `rotate_image_for_analysis` con `BORDER_REPLICATE` y deadband 0.5° | `BORDER_REPLICATE` rellena bordes con el pixel mas cercano del original — para una radiografia donde el fondo ya es oscuro uniforme, produce un fade limpio en vez de bandas negras que el binary segmenter podria confundir con la cavidad toracica. Deadband 0.5° evita que el slider sentado en 0 pague el costo de `cv2.warpAffine` (que introduce ruido sub-pixel de interpolacion bilinear en cada llamada). Cero cambios en el pipeline interno — toda la cirugia es en el callback de Gradio. |
+| 2026-05-19 (Ciclo 5.6) | `gr.State` para imagen original + live preview en `rotation_slider.change` | Sin un state separado, el preview rotaria la imagen MOSTRADA (que a su vez fue producto del cambio anterior del slider), acumulando rotaciones. Con `gr.State` la slider rota siempre la ORIGINAL upload. `input_image.upload` (que solo fira para uploads de usuario, no para escrituras programaticas del preview) guarda la original + resetea el slider a 0. Resultado: dragging el slider de 0 → 10 → 20 rota la original por 20°, no 30°. Apreciable visualmente en <300ms. |
+| 2026-05-19 (Ciclo 5.6) | Botones de rotacion atomicos: retornan `(new_slider, rotated_image)` en un solo handler | Confiar solamente en `rotation_slider.change` para que dispare tras un update programatico no es robusto entre versiones de Gradio. Cada boton ahora calcula el nuevo slider value, rota la original por ese valor, y retorna ambos a sus respectivos outputs en un solo round-trip. Atomic widget+display update, sin race condition entre los dos. |
+| 2026-05-19 (Ciclo 5.6) | `predict()` pierde el parametro `rotation_deg` que tenia en 5.5 | El live preview hace que `input_image` al momento de Analyze ya este rotada visualmente — predict solo necesita delegar al pipeline. Mantener `rotation_deg` ademas seria riesgo de doble-rotacion (si el closure rota nuevamente lo que ya esta rotado). El helper `rotate_image_for_analysis` se queda como funcion pura, usado por `preview_rotation_for_display`. Contrato mas limpio + el regresion-pin `test_predict_callback_no_longer_takes_rotation_deg` evita volver al estado anterior. |

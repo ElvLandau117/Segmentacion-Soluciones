@@ -10,6 +10,7 @@
 > **Addendum 5.3** (2026-05-19): cobertura del binary + UX informativa. Ver sección 13.
 > **Addendum 5.4** (2026-05-19): robustez ante rotación + UX de la viz Cobb. Ver sección 14.
 > **Addendum 5.5** (2026-05-19): control manual de rotación en la UI. Ver sección 15.
+> **Addendum 5.6** (2026-05-19): live preview de la rotación. Ver sección 16.
 
 ---
 
@@ -781,3 +782,119 @@ un commit atómico al path correcto. Lesson learned: siempre pasar
 - **No hay rotación + flip combinados** (e.g., para una radiografía
   espejada). Caso muy raro; los 5 botones cubren los casos prácticos
   (±5°, ±90°, reset). Si surge, agregar un toggle Flip-H en Ciclo 6.
+
+---
+
+## 16. Addendum 5.6 — Live preview de la rotación
+
+> **Fecha:** 2026-05-19.
+> **Motivación:** El slider del 5.5 actualizaba un número pero la
+> imagen mostrada NO rotaba hasta presionar Analyze (10s en CPU). Cita
+> de Elvis (paráfrasis): "la idea es que te muestre cómo queda al rotar
+> la imagen para que él pueda decidir cómo dejarla y ahí sí hacer el
+> análisis". Sin feedback visual, dialing el ángulo correcto requería
+> múltiples ciclos de Analyze, cada uno al costo completo de inferencia.
+
+### Flujo antes vs después
+
+**Antes (Ciclo 5.5):**
+1. Mover slider → solo cambia un valor numérico.
+2. Presionar Analyze (10s CPU).
+3. Ver resultado.
+4. Si la rotación quedó mal, repetir.
+
+**Después (Ciclo 5.6):**
+1. Mover slider → **la imagen rota en vivo (~50-150ms)**.
+2. Ajustar hasta que la columna se vea vertical.
+3. **Un solo Analyze al final** (10s, una vez).
+
+### Pieza nueva clave: `gr.State` para imagen original
+
+Sin un state separado, el preview rotaría la imagen MOSTRADA (que ya
+puede ser producto del cambio anterior del slider), acumulando
+rotaciones cuando el usuario arrastra el slider por valores
+intermedios. La solución estándar de Gradio:
+
+```python
+original_image_state = gr.State(value=None)
+```
+
+- `input_image.upload(...)` guarda la imagen recién subida en este
+  state y resetea el slider a 0. Solo dispara para uploads de usuario
+  (no para escrituras programáticas del preview pipeline).
+- `rotation_slider.change(...)` rota la **original** (no la mostrada)
+  por el valor actual del slider, escribiendo el resultado en
+  `input_image`.
+
+### Cambios
+
+| Cambio | Detalle |
+|---|---|
+| Helper module-level `preview_rotation_for_display(original, deg)` | Delega a `rotate_image_for_analysis`. Retorna None cuando original es None (slider movido antes de cualquier upload). |
+| `gr.State(value=None)` para imagen original | Stash en upload + reset slider a 0. |
+| `rotation_slider.change` handler | Rota original → escribe en `input_image`. |
+| 5 botones rápidos atómicos | Cada uno retorna `(new_slider, rotated_image)` en un handler único. Más robusto que esperar a que `slider.change` dispare después de update programático. |
+| Reset button | Retorna `(0.0, original_unrotated)` — slider Y display vuelven a estado uploaded. |
+| `predict()` pierde `rotation_deg` | Por que `input_image` al momento de Analyze ya está rotada visualmente. Predict solo delega al pipeline. Cero riesgo de doble-rotación. |
+| `predict_btn.click` inputs | Simplificado a `[input_image]` (no slider). |
+| `rotate_image_for_analysis` | Se queda como helper puro; ahora también lo usa `preview_rotation_for_display`. |
+
+### Tests añadidos (Ciclo 5.6)
+
+1. `test_preview_rotation_for_display_handles_none` — None original a
+   cualquier ángulo retorna None sin crash. Cubre "slider movido antes
+   de upload".
+2. `test_preview_rotation_for_display_returns_rotated` — Imagen
+   sintética + 90° → resultado distinto al original. Sanity de que
+   delega al helper.
+3. `test_predict_callback_no_longer_takes_rotation_deg` — Regression
+   pin contra accidentalmente poner `rotation_deg` de vuelta en el
+   closure. Verifica que la signature del callback es de 1 argumento.
+
+Los 3 tests del 5.5 sobre `rotate_image_for_analysis` siguen pasando —
+el helper no cambió.
+
+Suite final: **47 passed + 1 skipped** (era 44 + 1).
+
+### Smoke remoto
+
+Sin live preview testeable via `gradio_client` (es UI-only). Lo que sí
+se testea via API:
+
+| Caso | rotation slider | Resultado | Validación |
+|---|---|---|---|
+| `N_61` | 0 (sin tocar) | 17.1° fantasma + ROTATION WARNING | igual al 5.5 ✓ |
+| `N_1`  | 0 (sin tocar) | 0° Normal                          | igual al 5.5 ✓ |
+| `S_22` | 0 (sin tocar) | 1 curva 19.5° + COVERAGE WARNING   | igual al 5.5 ✓ |
+
+Cero regresión a la ruta del Analyze. El live preview se valida
+manualmente en browser:
+
+- Subir N_61 → slider en 0 → spine se ve tilted.
+- Mover slider a +13° lentamente → spine rota en vivo y queda vertical
+  (visible en <300ms en CPU basic free).
+- Presionar Analyze → "0° Normal" en menos de un round-trip de prueba-y-error.
+
+### Commits del Ciclo 5.6
+
+- `ca0989e` feat(app): live preview of rotation — slider drags rotate the image in-place
+- `<este>` docs(cycle5): close cycle 5.6 — live rotation preview
+
+### Limitaciones honestas
+
+- **Performance del preview en imágenes muy grandes** (~3000×4000):
+  `cv2.warpAffine` puede tomar 100-200ms + round-trip http. En CPU
+  basic free, podría sentirse menos fluido. Si surge, cambiar
+  `rotation_slider.change` → `rotation_slider.release` (preview solo al
+  soltar). No es bloqueante en imágenes típicas del dataset MaIA.
+- **`gr.State` se mantiene en el cliente del navegador**: si el usuario
+  recarga la página, pierde el state. Pero también pierde el upload
+  (input_image se limpia). Comportamiento consistente.
+- **Si el usuario sube una imagen muy diferente sin presionar Reset**:
+  el upload handler resetea el slider a 0 automáticamente, evitando que
+  la nueva imagen aparezca rotada por el valor previo. Probado y
+  funcional.
+- **Sin live preview de la segmentación**: Cobb/overlays siguen
+  apareciendo solo después de Analyze. Eso es por diseño — la
+  segmentación es el cómputo caro (10s). El preview solo afecta la
+  decisión "¿cuánto rotar?", no "¿cuál es el diagnóstico?".
