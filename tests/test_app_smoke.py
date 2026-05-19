@@ -358,6 +358,106 @@ def test_compute_orientation_info_handles_empty_or_collinear():
 
 
 # ----------------------------------------------------------------------------
+# Label dedup + anti-overlap in viz — Ciclo 5.4 (fix I)
+# ----------------------------------------------------------------------------
+
+def test_draw_single_cobb_curve_dedupes_shared_vertebra_label():
+    """When two curves share a vertebra (e.g. T9 is the lower end of the
+    principal AND the upper end of the secondary), the second call must NOT
+    add a duplicate label for that shared vertebra. The accumulators are
+    mutated in place so the caller can drive the dedup across curves."""
+    import numpy as np
+    from spine_segmentation.evaluation.visualize import _draw_single_cobb_curve
+
+    h, w = 400, 200
+    vis = np.zeros((h, w, 3), dtype=np.uint8)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    # Three vertebrae regions; T9 is shared between the two curves below.
+    mask[40:60, 80:140] = 6
+    mask[180:200, 80:140] = 9   # T9 (shared)
+    mask[330:350, 80:140] = 14
+
+    def vert(class_id, name, top, bottom):
+        return {
+            "class_id": class_id,
+            "name": name,
+            "centroid_x": 110.0,
+            "centroid_y": (top + bottom) / 2.0,
+            "bbox": (top, 80, bottom, 140),
+            "orientation": 0.0,  # horizontal endplate
+        }
+
+    upper1 = vert(6, "T6", 40, 60)
+    lower1 = vert(9, "T9", 180, 200)
+    upper2 = vert(9, "T9", 180, 200)
+    lower2 = vert(14, "L2", 330, 350)
+
+    labeled_vertebrae: set = set()
+    placed_label_rects: list = []
+
+    # First curve: T6 -> T9. Both names get added.
+    _draw_single_cobb_curve(
+        vis, mask, upper1, lower1, cobb_deg=25.0, color=(255, 0, 0),
+        draw_speedometer_if_small=False, label_prefix="[Principal] ",
+        labeled_vertebrae=labeled_vertebrae,
+        placed_label_rects=placed_label_rects,
+    )
+    assert "T6" in labeled_vertebrae
+    assert "T9" in labeled_vertebrae
+    rects_after_first = len(placed_label_rects)
+    assert rects_after_first == 2
+
+    # Second curve: T9 -> L2. T9 is dedup'd; only L2 adds a new label.
+    _draw_single_cobb_curve(
+        vis, mask, upper2, lower2, cobb_deg=12.0, color=(255, 100, 200),
+        draw_speedometer_if_small=False, label_prefix="[Secundaria] ",
+        labeled_vertebrae=labeled_vertebrae,
+        placed_label_rects=placed_label_rects,
+    )
+    assert "L2" in labeled_vertebrae
+    # T9 is still tracked (set behaviour) but no extra rect was added for it.
+    assert len(placed_label_rects) == rects_after_first + 1
+
+
+def test_draw_single_cobb_curve_shifts_overlapping_labels_down():
+    """If a non-shared vertebra's label position would collide with a
+    previously placed label (rare but possible at small image sizes), the
+    new label must be shifted vertically until it fits or the function
+    accepts the original spot if there's no room."""
+    import numpy as np
+    from spine_segmentation.evaluation.visualize import _draw_single_cobb_curve
+
+    h, w = 400, 200
+    vis = np.zeros((h, w, 3), dtype=np.uint8)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask[40:60, 80:140] = 6
+    mask[60:80, 80:140] = 7   # right below T6 -> label would collide
+
+    def vert(cid, name, top, bottom):
+        return {
+            "class_id": cid, "name": name,
+            "centroid_x": 110.0, "centroid_y": (top + bottom) / 2.0,
+            "bbox": (top, 80, bottom, 140), "orientation": 0.0,
+        }
+
+    upper = vert(6, "T6", 40, 60)
+    lower = vert(7, "T7", 60, 80)
+    labeled: set = set()
+    rects: list = []
+
+    _draw_single_cobb_curve(
+        vis, mask, upper, lower, 10.0, (255, 0, 0),
+        draw_speedometer_if_small=False, label_prefix="",
+        labeled_vertebrae=labeled, placed_label_rects=rects,
+    )
+    assert len(rects) == 2
+    # The two rects must not overlap each other.
+    r1, r2 = rects
+    from spine_segmentation.evaluation.visualize import _rects_overlap
+    assert not _rects_overlap(r1, r2), "labels overlap despite shift logic"
+
+
+# ----------------------------------------------------------------------------
 # Degenerate-curve filtering — Ciclo 5.4 (fix H)
 # ----------------------------------------------------------------------------
 

@@ -313,6 +313,15 @@ def _draw_binary_overlay(vis, cobb_binary_result):
         cv2.circle(vis, (int(ix), int(iy)), 5, (0, 0, 0), 1, lineType=cv2.LINE_AA)
 
 
+def _rects_overlap(
+    a: tuple[int, int, int, int], b: tuple[int, int, int, int]
+) -> bool:
+    """Axis-aligned bounding-box overlap test. Rects are (x1, y1, x2, y2)."""
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    return not (ax2 <= bx1 or bx2 <= ax1 or ay2 <= by1 or by2 <= ay1)
+
+
 def _draw_single_cobb_curve(
     vis: np.ndarray,
     multiclass_mask: np.ndarray,
@@ -322,6 +331,8 @@ def _draw_single_cobb_curve(
     color: tuple,
     draw_speedometer_if_small: bool = True,
     label_prefix: str = "",
+    labeled_vertebrae: set | None = None,
+    placed_label_rects: list | None = None,
 ) -> np.ndarray:
     """Render ONE Cobb curve on the given image.
 
@@ -410,18 +421,54 @@ def _draw_single_cobb_curve(
     if draw_speedometer_if_small and (cobb_deg < 8.0 or not intersection_in_frame):
         _draw_speedometer(vis, cobb_deg)
 
-    # 9) End-vertebra labels (small, beside the bbox; prefixed when multi-curve).
+    # 9) End-vertebra labels with dedup + anti-overlap (Ciclo 5.4 fix I).
+    # When multiple curves share a vertebra (e.g. T9 is lower of principal AND
+    # upper of secondary), the old code wrote the label 4 times in identical
+    # coordinates, producing illegible stacked text. Now we:
+    #   (a) skip a vertebra that already has a label from a previous curve;
+    #   (b) shift overlapping labels down in 16 px steps until they fit.
+    # Both accumulators default to local empties so old callers (e.g. unit
+    # tests that call this helper directly without dedup) keep working.
+    if labeled_vertebrae is None:
+        labeled_vertebrae = set()
+    if placed_label_rects is None:
+        placed_label_rects = []
+
     for v, role in ((upper_v, "Superior"), (lower_v, "Inferior")):
+        v_name = v.get("name")
+        if v_name in labeled_vertebrae:
+            # Vertebra already labeled by a previous curve — geometry stays
+            # drawn (boxes, perps, arc) but the text would just stack.
+            continue
+
+        text = f"{label_prefix}{role} ({v_name})"
+        (tw, th), baseline = cv2.getTextSize(
+            text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1
+        )
         min_row, min_col, max_row, max_col = v["bbox"]
         text_x = min(max_col + 5, w - 220)
-        text_y = max(20, (min_row + max_row) // 2)
+        text_y0 = max(20, (min_row + max_row) // 2)
+
+        # Walk down in 16 px steps until no overlap or we run off the frame.
+        text_y = text_y0
+        for _ in range(20):
+            rect = (text_x, text_y - th, text_x + tw, text_y + baseline)
+            if not any(_rects_overlap(rect, r) for r in placed_label_rects):
+                break
+            text_y += 16
+            if text_y + baseline >= h:
+                text_y = text_y0  # bottomed out — accept the original spot
+                break
+
         cv2.putText(
-            vis,
-            f"{label_prefix}{role} ({v['name']})",
-            (text_x, text_y),
+            vis, text, (text_x, text_y),
             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1,
             lineType=cv2.LINE_AA,
         )
+        placed_label_rects.append(
+            (text_x, text_y - th, text_x + tw, text_y + baseline)
+        )
+        labeled_vertebrae.add(v_name)
 
     return vis
 
@@ -503,6 +550,10 @@ def draw_cobb_angle_visualization(
             (255, 0, 0),       # red — principal
             (255, 100, 200),   # magenta — secondary
         ]
+        # Ciclo 5.4 fix I: pass shared accumulators through every curve call so
+        # labels dedup across curves (vertebra labelled once) and avoid stacking.
+        labeled_vertebrae: set = set()
+        placed_label_rects: list = []
         drawn_any = False
         for i, curve in enumerate(curves[:2]):
             upper_name = curve.get("upper_vertebra")
@@ -522,6 +573,8 @@ def draw_cobb_angle_visualization(
                 color=color,
                 draw_speedometer_if_small=(i == 0),  # only for principal
                 label_prefix=prefix,
+                labeled_vertebrae=labeled_vertebrae,
+                placed_label_rects=placed_label_rects,
             )
             drawn_any = True
 
