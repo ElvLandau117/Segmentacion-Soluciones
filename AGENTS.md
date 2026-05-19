@@ -6,13 +6,16 @@
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
-> **✅ Estado real:** App funcionando end-to-end con UX clinica mejorada (Ciclo 5 + 5.1):
+> **✅ Estado real:** App funcionando end-to-end con UX clinica mejorada (Ciclo 5 + 5.1 + 5.2):
 > visualizacion del Cobb con cajas verdes en end vertebrae + perpendiculares rojas al endplate
 > + arco del angulo + speedometer fallback + overlay del binary (spline + inflection points).
-> UI dual-Cobb con indicador de concordancia, Assessment basado en Cobb binary (mas robusto
-> que multiclass). Smoke remoto verde con todos los colores correctos (rojo/verde/cyan/amarillo).
-> El caso S_21 ahora se detecta como "Mild" correctamente (antes salia "Normal" por usar el
-> multiclass ruidoso).
+> **Detección multi-curva (5.2):** binary identifica TODAS las curvas (S-shape, triple-curve)
+> via inflection points multiples del spline, reportadas como "Curva principal / secundaria /
+> ..." con direccion y nombres de vertebrae (label transfer desde multiclass). UI dual-Cobb
+> con indicador de concordancia, Assessment basado en Cobb binary principal. Smoke remoto
+> verde: caso S_100 detecta 2 curvas (84° toracica T5-T12 + 65° lumbar T12-L4), antes
+> habria salido como un solo angulo enganoso. El multiclass queda SOLO como ilustracion +
+> fuente de nombres de vertebrae.
 
 > **Si eres nuevo en el proyecto:** sigue la [`docs/RUTA_LECTURA.md`](docs/RUTA_LECTURA.md)
 > antes de hacer cualquier cambio.
@@ -194,9 +197,18 @@ ideas de visualizacion + fusion de mediciones.
 - [x] UI dual-Cobb: ambos metodos en paralelo + indicador de CONCORDANCIA
       (<=5° alta / <=15° revisar / >15° discrepancia)
 - [x] Refactor: `build_results_text` extraido como helper testeable (puro)
-- [x] 8 tests nuevos en total (suite: 21 passed + 1 skipped)
-- [x] Deploy via `scripts/upload_to_space.py` (3 archivos, rebuild ~90s)
-- [x] Smoke test remoto verde — el caso S_21 que antes daba "Normal"
+- [x] **Deteccion multi-curva (Ciclo 5.2)**: `cobb_from_binary` ahora devuelve
+      `curves: list[dict]` con TODAS las curvas detectables (pairs adyacentes
+      de inflection points), no solo los 2 extremos. Cada curva con: angulo,
+      direccion (right/left), ip_upper/ip_lower, rank. `assign_vertebra_names
+      _to_curves` hace label-transfer desde multiclass para nombrar end
+      vertebrae (T5-T12, etc.). UI texto reorganizada en bloques "Curva
+      principal / secundaria / Curva N" + convexidad. Viz dibuja las 2
+      mayores con colores distintos (red principal, magenta secundaria).
+- [x] 12 tests nuevos en total (suite: 25 passed + 1 skipped)
+- [x] Deploy via `scripts/upload_to_space.py` (4 archivos en Ciclo 5.2)
+- [x] Smoke test remoto verde — S_100 detecta 2 curvas (84° toracica + 65°
+      lumbar); el caso S_21 que antes daba "Normal"
       (multiclass=0.4°) ahora reporta "Mild scoliosis" correctamente
       (binary=15.1°, concordancia: "Review recommended")
 
@@ -395,3 +407,5 @@ Orden corto:
 | 2026-05-17 noche | NO replicar paper Shi et al. 2025 completo | Su modelo HRNet+Swin+dual-task requiere landmarks anotados de upper/lower endplate por vertebra. Nuestro MaIA tiene mascaras de segmentacion (no landmarks). Reanotar es trabajo clinico de semanas, no viable en este semestre. Si extrapolamos sus ideas A (visualizacion) y B (fusion de mediciones) — Ciclo 5. VWI y SVD sobre matriz de angulos quedan fuera (requieren los mismos landmarks). |
 | 2026-05-17 noche (Ciclo 5.1) | Cobb viz: perpendiculares al endplate (no a lo largo) + arco + speedometer + overlay del binary | La viz del Ciclo 5 dibujaba lineas A LO LARGO del endplate. Convencion clinica + Fig 1 del paper usa perpendiculares (las que cruzan formando el angulo visible). Para angulos pequeños (<8°) las perpendiculares quedan casi paralelas y la interseccion sale fuera del frame: usar mini "Cobb-meter" en esquina como fallback con la aguja escalada 4x para que se mueva visiblemente. Se aprovechan los datos del binary (`spline_x/y` + `inflection_points`) que ya devolvia `cobb_from_binary` y que la viz no usaba. |
 | 2026-05-17 noche (Ciclo 5.1) | Convencion de color RGB (no BGR) en visualizaciones que pasan por Gradio | La imagen llega a `draw_cobb_angle_visualization` como RGB (Gradio convencion). cv2 no transforma color spaces — solo escribe los 3 valores en orden. Pasar `(0, 0, 255)` (rojo BGR canonical) en un array RGB pinta AZUL puro. Todas las llamadas cv2 que esperan rojo usan ahora `(255, 0, 0)`; similar para amarillo `(255, 255, 0)`. Detectado por smoke remoto que encontro 0 red pixels. |
+| 2026-05-17 noche (Ciclo 5.2) | `cobb_from_binary` devuelve `curves: list[dict]`, no un solo angulo | El algoritmo original solo usaba los 2 inflection points mas extremos del spline y reportaba UN angulo. Para escoliosis con doble curva (S-shape, comun en pacientes con curva toracica principal + curva lumbar compensatoria, como describe Julian Florido en su ejemplo de informe radiologico real), la segunda curva nunca aparecia en el reporte. Ahora se calcula un Cobb por cada par adyacente de IPs, se filtra debajo de 3° (ruido), y se ordenan por magnitud. Confirmado en smoke remoto con S_100: detecta 84° toracica + 65° lumbar. |
+| 2026-05-17 noche (Ciclo 5.2) | Multiclass solo para naming + ilustracion, no para Assessment | Su Dice 0.34 (y el de Julian 0.09) son insuficientes para calcular Cobb por endplate. El multiclass se mantiene en el pipeline porque sus mascaras dan info anatomica (que vertebrae componen cada curva del binary) — `assign_vertebra_names_to_curves` hace label-transfer por nearest-y. Assessment severidad usa la curva mayor del binary, no el multiclass. |

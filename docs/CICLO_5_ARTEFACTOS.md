@@ -253,3 +253,150 @@ La visualización del Cobb angle está inspirada en Fig 1 de Shi et al. 2025
 ("Accurate Cobb Angle Estimation via SVD-Based Curve Detection and
 Vertebral Wedging Quantification", IEEE J-BHI, arXiv:2509.24898).
 Documentado en el docstring de `draw_cobb_angle_visualization` + README sec 9.
+
+---
+
+## 12. Addendum 5.2 — Detección multi-curva (rotoescoliosis y S-curve)
+
+> **Fecha:** 2026-05-17 noche (misma sesión, posterior al polish 5.1).
+> **Motivación:** Julian Florido (compañero de Elvis) compartió un ejemplo
+> real de informe radiológico de **rotoescoliosis con doble curvatura**:
+> "Curva principal torácica T5-L1, ápice T8-T9, Cobb ~35°, convexidad derecha.
+> Curva lumbar compensatoria, Cobb ~18°, convexidad izquierda."
+> Diagnóstico: nuestra app reportaba UN solo ángulo Cobb. Para escoliosis con
+> doble curva (S-shape, muy común en escoliosis adolescente), la curva
+> compensatoria nunca aparecía en el reporte. Es una limitación algorítmica,
+> no del modelo de segmentación.
+
+### Análisis crítico de los modelos del compañero (Julian)
+
+| Métrica | Su modelo | Nuestro modelo | Notas |
+|---|:-:|:-:|---|
+| Segmentación binaria — Dice | 0.8840 | ~0.85 | similares |
+| Cobb central — MAE / r | 20.25° / 0.76 | 23.0° / 0.66 | suyo modestamente mejor |
+| Cobb vertebral v5 — MAE / r | 18.06° / **0.15** | 26.8° / 0.20 | r=0.15 es ruido, no señal |
+| Segmentación multiclase — Dice | **0.0984** | 0.3378 | el suyo es peor |
+
+Conclusión: **reentrenar el multiclass no resuelve el problema**. La solución
+es algorítmica (multi-curve detection sobre el binary), no de modelo.
+
+### Cambios algorítmicos
+
+1. **`cobb_from_binary`** ([cobb_angle.py:35-159](../spine_segmentation/evaluation/cobb_angle.py))
+   - Computa un Cobb por CADA par adyacente de inflection points, no solo
+     los 2 extremos. Una S-shape (3 IPs) → 2 curvas; triple-curve (5 IPs)
+     → 4 candidatos.
+   - Filtra candidatos con `cobb_angle_deg < min_curve_deg=3°` (ruido).
+   - Devuelve `curves: list[dict]` ordenada por magnitud descendente.
+   - Cada curva: `cobb_angle_deg`, `ip_upper`, `ip_lower`, `slope_upper`,
+     `slope_lower`, `direction` ("right"/"left"/"neutral"), `rank`.
+   - Expone `all_inflection_points` (todos los IPs, para overlay del binary).
+   - Back-compat: `cobb_angle_deg` = magnitud de la curva principal;
+     `inflection_points` = los 2 IPs de la principal.
+
+2. **`assign_vertebra_names_to_curves`** ([cobb_angle.py:161-187](../spine_segmentation/evaluation/cobb_angle.py))
+   - Para cada curva, busca la vértebra multiclass más cercana (por y) a
+     cada IP. Hace label-transfer: la curva gana `upper_vertebra`,
+     `lower_vertebra` (ej. "T5", "T12").
+   - **El multiclass se usa solo para nombrar**, nunca para el Cobb (Dice
+     0.34 es ruido para mediciones per-vertebra).
+
+3. **`inference.py`** llama `assign_vertebra_names_to_curves` justo después
+   de tener ambos resultados (binary + multiclass).
+
+### Cambios en la UI
+
+[`build_results_text`](../spine_segmentation/deployment/app.py) — layout
+multi-curva en español (matching el informe radiológico clínico):
+
+```
+=== COBB ANGLE - Curvas detectadas ===
+Curva principal:    XX.X deg  (Tn - Lm, convexidad <derecha|izquierda>)
+Curva secundaria:   YY.Y deg  (Tn - Lm, convexidad <opuesta>)
+[Curva N:           ...  — solo si hay >2]
+
+=== CROSS-CHECK binary vs multiclass ===
+    Binary principal:    XX.X deg
+    Multiclass:          MM.M deg  (Upper=Cn, Lower=Tm; illustration only)
+    CONCORDANCIA: <High agreement | Review | Significant discrepancy>
+
+=== ASSESSMENT (based on Binary principal) ===
+<Normal/Mild/Moderate/Severe>
+Numero total de curvas detectadas: N (S-curve / triple-curve / ...)
+```
+
+### Cambios en la visualización
+
+Nuevo helper privado `_draw_single_cobb_curve` en
+[visualize.py](../spine_segmentation/evaluation/visualize.py). El orquestador
+lo llama una vez por curva (top 2 por magnitud). Diferenciación de colores:
+
+| Curva | Color (RGB) |
+|---|---|
+| Principal | RED (255, 0, 0) |
+| Secundaria | MAGENTA (255, 100, 200) |
+
+Header del viz lista las dos con sus colores correspondientes. Speedometer
+solo para la principal (evita dos gauges peleando por la esquina).
+
+### Smoke remoto verde
+
+Probado contra varios casos del MaIA dataset:
+
+| Caso | Curva principal | Curva secundaria | Comportamiento |
+|---|---|---|---|
+| `N_1` (Normal) | 0.0° (binary) | — | "no clinically meaningful curves" |
+| `S_21` (leve) | 15.1° T6-L1, conv. izquierda | — | 1 curva, Assessment Mild |
+| `S_45` | 31.7° T3-T9 | — | 1 curva, escoliosis simple |
+| `S_77` | 40.7° T4-T8 | — | 1 curva |
+| **`S_100` (severa S-shape)** | **84.2° T5-T12** | **65.0° T12-L4** | **2 curvas ✓ rotoescoliosis** |
+| `S_120` | 55.8° T4-T11 | — | 1 curva grave |
+| `S_130` | 75.7° T4-T11 | — | 1 curva muy grave |
+| `S_150` | 54.8° T2-T11 | — | 1 curva grave |
+
+**S_100 es el caso pivote**: antes del Ciclo 5.2 habría devuelto un único
+Cobb (probablemente engañoso, posiblemente más bajo por la cancelación
+parcial entre las dos curvas opuestas). Ahora reporta correctamente las
+dos curvas con sus end vertebrae nombradas, replicando el estilo del
+informe que compartió Julian.
+
+### Tests añadidos (Ciclo 5.2)
+
+- `test_cobb_from_binary_detects_two_curves_on_s_shape` — sintético 2-cycle
+  sinusoidal → ≥2 curvas con keys completos.
+- `test_assign_vertebra_names_to_curves_label_transfer` — nearest-y por
+  IP, con caso de multiclass vacío.
+- `test_build_results_text_multi_curve_layout` — texto con
+  "Curva principal", "Curva secundaria", "T5 - T12", convexidades,
+  S-curve descriptor, Assessment desde la principal.
+- `test_draw_cobb_visualization_multi_curve_uses_two_colors` — render
+  contiene tanto RED como MAGENTA píxeles en cantidades coherentes.
+
+Suite final: **25 passed + 1 skipped** (era 21 + 1 antes del 5.2).
+
+### Commits del Ciclo 5.2
+
+- `e9f7190` feat(cobb): detect multiple curves (s-shape, triple) from binary spline
+- `3da21d8` feat(app): report all detected curves in diagnosis text
+- `798ec3d` feat(viz): draw principal and secondary cobb curves
+- `6e4fc2c` test: cover multi-curve cobb detection and rendering
+- `<este>` docs(cycle5): close cycle 5.2 — multi-curve cobb
+
+### Limitaciones honestas que persisten
+
+- **Precisión absoluta del Cobb**: nuestro MAE sigue siendo ~23°. Multi-curve
+  detection mejora la INFORMACIÓN clínica reportada (1 curva → 2 curvas
+  cuando aplica), pero NO mejora la precisión numérica de cada ángulo. Eso
+  requeriría reentrenamiento o cambio arquitectural (Ciclo 6+).
+- **Componente rotacional vertebral**: el informe de Julian menciona
+  "asimetría de los pedículos" como signo de rotoescoliosis. **NO podemos
+  medir esto** con segmentación de silueta — requeriría detección de
+  estructuras internas (pedículos), que necesita anotaciones específicas.
+- **Direction estimate**: `_curve_direction` usa el signo del slope en el
+  midpoint entre los 2 IPs. En casos sintéticos perfectos funciona; en
+  radiografías reales con spline ruidoso puede dar "right" cuando deberia
+  decir "left". No es bloqueante (es info auxiliar).
+- **Naming de vértebras depende del multiclass**: si el multiclass falla
+  en detectar (por ejemplo) T8, la curva con IP cerca de T8 reciba el
+  nombre de T7 o T9 (el más cercano). Mejora poco con el multiclass actual
+  (Dice 0.34).

@@ -1,13 +1,16 @@
-# Prompt para el próximo chat — Ciclo 5 + 5.1 cerrados, pendiente brief de Ciclo 6
+# Prompt para el próximo chat — Ciclo 5 + 5.1 + 5.2 cerrados, pendiente brief de Ciclo 6
 
-> **Estado al 2026-05-17 noche:** Ciclo 5 + 5.1 ✅ COMPLETOS.
+> **Estado al 2026-05-17 noche:** Ciclo 5 + 5.1 + 5.2 ✅ COMPLETOS.
 > - Assessment via binary (más robusto).
-> - Visualización Cobb tipo Fig 1 de Shi et al. 2025: cajas verdes en end vertebrae
->   + perpendiculares rojas al endplate + arco del ángulo + speedometer para casos
->   leves + overlay del binary (spline + inflection points).
-> - UI dual-Cobb con CONCORDANCIA.
-> - Smoke remoto verde con colores correctos (rojo/verde/cyan/amarillo).
-> - Caso S_21 (escoliosis leve) ahora se detecta como "Mild" correctamente.
+> - Visualización Cobb tipo Fig 1 de Shi et al. 2025.
+> - **Detección multi-curva (5.2):** `cobb_from_binary` ahora detecta TODAS
+>   las curvas (S-shape, triple-curve) — antes solo reportaba 1 ángulo.
+>   Cada curva con dirección + nombres Tn/Lm. Viz dibuja las 2 mayores en
+>   colores distintos (red principal, magenta secundaria).
+> - Smoke remoto verde: S_100 detecta 2 curvas (84° toracica + 65° lumbar),
+>   antes habría salido un solo número engañoso.
+> - Multiclass queda como ilustración + label-transfer (no para Assessment).
+> - Suite: 25 passed + 1 skipped.
 >
 > **No hay handoff técnico pendiente.** El próximo chat debe definir el scope
 > del Ciclo 6 (refinamiento de modelo y/o entrega académica final) y escribir
@@ -37,13 +40,15 @@ U. Andes, Coursera).
 - Pesos en HF Hub: `ElvLandau/spine-checkpoints`.
 - 4 tabs operativos (Binary, Vertebrae, Cobb, Explainability) con disclaimer.
 - Gradio 5.50.0 + huggingface_hub>=0.33.5 + Python 3.11.
-- 21 tests pasando (1 gated por checkpoints locales).
+- 25 tests pasando (1 gated por checkpoints locales).
 - Mecanismo reproducible de updates: `scripts/upload_to_space.py`.
-- **UX clínica Cobb (Ciclo 5 + 5.1):** Assessment basado en binary (más robusto),
-  visualización tipo Fig 1 de Shi et al. 2025 con perpendiculares + arco +
-  cajas + endplate markers + speedometer + binary overlay (spline + inflection
-  points), UI con ambos métodos + indicador de concordancia, convención RGB
-  consistente.
+- **UX clínica Cobb (Ciclo 5 + 5.1 + 5.2):** Assessment basado en binary
+  (más robusto), visualización tipo Fig 1 de Shi et al. 2025 con
+  perpendiculares + arco + cajas + endplate markers + speedometer + binary
+  overlay. **Multi-curve detection**: `cobb_from_binary` devuelve lista de
+  curvas (S-shape, triple-curve), cada una con dirección + nombres Tn/Lm via
+  label-transfer del multiclass. Viz dibuja top 2 con colores distintos.
+  Multiclass solo como ilustración + naming, no para Assessment.
 
 ### Lo que sigue (Ciclo 6)
 
