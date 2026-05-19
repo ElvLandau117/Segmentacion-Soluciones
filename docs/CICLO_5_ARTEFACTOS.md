@@ -9,6 +9,7 @@
 > **Addendum 5.2** (mismo día): detección multi-curva (rotoescoliosis). Ver sección 12.
 > **Addendum 5.3** (2026-05-19): cobertura del binary + UX informativa. Ver sección 13.
 > **Addendum 5.4** (2026-05-19): robustez ante rotación + UX de la viz Cobb. Ver sección 14.
+> **Addendum 5.5** (2026-05-19): control manual de rotación en la UI. Ver sección 15.
 
 ---
 
@@ -651,3 +652,132 @@ Suite final: **41 passed + 1 skipped** (era 32 + 1 antes del 5.4).
 - **MIN_IP_Y_DISTANCE_PX = 30 es heurístico**. Calibrado a 512×512 input.
   Si el image_size cambia en el futuro, esta constante necesita
   re-escalar.
+
+---
+
+## 15. Addendum 5.5 — Control manual de rotación en la UI
+
+> **Fecha:** 2026-05-19.
+> **Motivación:** El smoke remoto del 5.4 confirmó que `N_61` seguía
+> produciendo 1 curva fantasma 17.1° catalogada como "Mild scoliosis" a
+> pesar del nuevo `=== ROTATION WARNING ===`. El warning explica el
+> porqué, pero un médico apurado puede leer el número y saltarse el
+> warning.
+>
+> El fix raíz era de-rotar la imagen antes del análisis. Auto-rotación
+> era el primer candidato, pero al planificar surgieron 2 riesgos:
+> 1. **Casos borderline** (S_100 tilt 12.6°, S_150 tilt 12.8°) habrían
+>    sido auto-rotados, cambiando posiblemente magnitudes anatómicas
+>    reales.
+> 2. **Ambigüedad de signo**: `compute_orientation_info` retorna
+>    `tilt_deg` signed via SVD + arctan2 + wrap a (-90, 90]. Predecir
+>    qué dirección de rotación lo endereza en `cv2.getRotationMatrix2D`
+>    no es trivial. Confirmé post-hoc empíricamente que `-tilt_deg`
+>    HABRÍA EMPEORADO `N_61` (tilt 13.1° → 25.1°), no lo habría
+>    corregido — la dirección correcta era `+tilt_deg`.
+
+**Idea de Elvis (mejor):** exponer un control manual de rotación en la
+UI. El médico ve la imagen, decide si rotarla y cuánto, y obtiene
+feedback visual antes de Analyze. Cero magic, cero ambigüedad de signo
+(el ojo del médico da la dirección), cero riesgo en S_100/S_150 (si no
+los rota, no se rotan).
+
+### Diseño
+
+Bajo el componente `Image` de Gradio, antes del botón Analyze, se
+añaden:
+
+```
+Rotate image (degrees). Negative = clockwise.    [slider -180 ──────── +180]   0
+[↺ -90°]  [↺ -5°]  [Reset]  [↻ +5°]  [↻ +90°]
+[                       Analyze                      ]
+```
+
+- `gr.Slider(min=-180, max=180, value=0, step=1)` con etiqueta clara.
+- 5 botones rápidos modifican el slider por deltas (clip a (-180, 180)):
+  - `-90°` y `+90°` para radiografías atravesadas o invertidas.
+  - `-5°` y `+5°` para ajuste fino.
+  - `Reset` salta a 0.
+- `predict_btn.click` ahora pasa `[input_image, rotation_slider]` como
+  inputs.
+
+### Cambios
+
+| Cambio | Archivo | Detalle |
+|---|---|---|
+| Helper module-level `rotate_image_for_analysis` | [`app.py`](../spine_segmentation/deployment/app.py) | `cv2.getRotationMatrix2D` + `cv2.warpAffine` con `BORDER_REPLICATE` y deadband `|deg| < 0.5°` (slider en 0 = identity, sin warp). Pure function: testeable sin Gradio. |
+| `predict()` acepta `rotation_deg` | misma | Aplica el helper antes de delegar al pipeline. La cadena `pipeline.predict() → build_results_text()` sigue intacta. |
+| UI: slider + 5 botones | misma | Bajo `input_image`, antes de Analyze. Click handlers de los botones usan `_adjust_rotation(current, delta)` con clipping. |
+| Bug fix latente | misma | Los early-returns de `predict()` (sin imagen / sin pipeline) devolvían 4 valores cuando el handler espera 5. Corregido en passing. |
+
+**NO se tocan**: `inference.py`, `cobb_angle.py`, `orientation.py`,
+`coverage.py`, `visualize.py`, `morphology.py`. Toda la cirugía es en
+la UI.
+
+### Smoke remoto (gradio_client) — 4 casos clave
+
+| Caso | Resultado | Validación |
+|---|---|---|
+| **`N_61` rotation=0** | 17.1° fantasma + ROTATION WARNING (tilt 13.1°) | Baseline Ciclo 5.4 (sin cambios cuando slider en 0) ✓ |
+| **`N_61` rotation=+13** | **0.0° Normal, sin ROTATION WARNING** | **FIXED — falso positivo eliminado vía control manual ✓✓** |
+| `N_1` rotation=0 | 0° Normal | sin regresión ✓ |
+| `S_22` rotation=0 | 1 curva 19.5° T6-T9 + COVERAGE WARNING | sin regresión ✓ |
+
+### Hallazgo crítico sobre la convención de signo
+
+Comprobado en `dev/smoke_local_cycle5_5.py`:
+
+| N_61 con | Tilt detectado post | Cobb binary | Severity |
+|---|---|---|---|
+| rotation=0      | 13.1° (sin cambio)  | 17.1° fantasma | Mild  |
+| rotation=-13    | **25.1° (empeoró)** | 6.9°           | Normal (pero coverage roto) |
+| rotation=+13    | **0.6° (resuelto)** | **0.0°**       | **Normal** |
+
+Si hubiera implementado auto-rotación con `-tilt_deg` (la convención
+intuitiva), N_61 habría EMPEORADO. Confirma post-hoc que el approach
+manual fue la decisión correcta: el feedback visual del médico
+resuelve la ambigüedad de signo en una sola intervención.
+
+### Tests añadidos (Ciclo 5.5)
+
+1. `test_rotate_image_for_analysis_zero_is_identity` — 0 / +0.3 / -0.4
+   deg retornan exactamente el mismo objeto (deadband 0.5°). Garantiza
+   que el slider en 0 no paga costo computacional.
+2. `test_rotate_image_for_analysis_90_swaps_axes` — Stripe vertical →
+   stripe horizontal después de +90°. Sanity geométrico.
+3. `test_rotate_image_for_analysis_handles_none` — None pasa unchanged,
+   sin crash, en cualquier ángulo.
+
+Suite final: **44 passed + 1 skipped** (era 41 + 1).
+
+### Commits del Ciclo 5.5
+
+- `a764878` feat(app): add manual rotation control (slider + quick buttons) before Analyze
+- `<este>` docs(cycle5): close cycle 5.5 — manual rotation control
+
+### Anécdota del deploy
+
+Primer intento de deploy (`upload_to_space.py --file ...app.py` sin
+`--path-in-repo`) defaultó al basename, subiendo el módulo completo a
+`app.py` (la raíz del Space) en lugar de `spine_segmentation/deployment/app.py`.
+Esto SOBRESCRIBIÓ el shim raíz (que solo importa `create_app` y expone
+`demo` para HF). Recovery: subir ambos archivos (shim raíz + módulo) en
+un commit atómico al path correcto. Lesson learned: siempre pasar
+`--path-in-repo` explícito cuando los archivos tienen el mismo basename.
+
+### Limitaciones honestas
+
+- **Sin live preview de la rotación**. El slider modifica un valor; la
+  imagen mostrada NO rota hasta presionar Analyze. Esto es lo más
+  simple (sin `gr.State`, sin doble-rotación). En la práctica clínica
+  el médico puede pulsar Analyze tras cada ajuste para ver el preview
+  segmentado. Live preview sería ~30 LOC adicionales con `gr.State`
+  para preservar el original; deferred a Ciclo 6 si se justifica.
+- **El slider no recuerda valores entre uploads**. Si cargas otra
+  imagen, el slider sigue donde lo dejaste. Tampoco hay handler de
+  upload que lo resetee. Para Ciclo 6 si molesta.
+- **Step de 1°**. Suficiente para corrección clínica (radiografías no
+  necesitan precisión sub-grado). Bajar a 0.5° si surge un caso real.
+- **No hay rotación + flip combinados** (e.g., para una radiografía
+  espejada). Caso muy raro; los 5 botones cubren los casos prácticos
+  (±5°, ±90°, reset). Si surge, agregar un toggle Flip-H en Ciclo 6.

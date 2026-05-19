@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -300,6 +300,53 @@ filtro `min_curve_deg` y confundian al usuario.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 14.
 
+### Ciclo 5.5 ✅ COMPLETO — Control manual de rotacion en la UI
+Smoke remoto del 5.4 mostro que el ROTATION WARNING era informativo pero
+el pipeline seguia corriendo sobre la imagen rotada: N_61 reportaba 1 curva
+fantasma 17.1° "Mild scoliosis" + warning. Auto-rotacion tenia riesgos
+(S_100 borderline + ambiguedad de signo de tilt_deg + falta de control
+clinico). Solucion mejor (idea de Elvis): exponer un control manual de
+rotacion en la UI Gradio.
+
+- [x] **Helper module-level `rotate_image_for_analysis(image, deg)`**
+      ([app.py](spine_segmentation/deployment/app.py)) — `cv2.warpAffine`
+      con `BORDER_REPLICATE` y deadband de 0.5° para que slider en 0 no
+      pague costo de warp.
+- [x] **`predict()` closure acepta `rotation_deg`** y aplica el helper
+      ANTES de delegar a `pipeline.predict()`. El pipeline interno ve la
+      imagen ya enderezada por el medico. Cero cambios en
+      `inference.py`, `cobb_angle.py`, `orientation.py`, `coverage.py`,
+      `visualize.py`, `morphology.py`.
+- [x] **UI nueva** debajo del componente de imagen:
+      `gr.Slider(-180, 180, value=0, step=1, "Rotate image (deg). Negative = clockwise.")`
+      + 5 botones rapidos: `↺ -90°`, `↺ -5°`, `Reset`, `↻ +5°`, `↻ +90°`.
+      Cada boton hace clip a (-180, 180). `predict_btn.click` ahora pasa
+      `[input_image, rotation_slider]` como inputs.
+- [x] **El ROTATION WARNING del Ciclo 5.4 se queda**: si despues de la
+      rotacion manual el SVD aun ve tilt > 12°, advierte ("you rotated,
+      but it's still tilted"). Si despues de rotar queda < 12°, no
+      warning. Si no se rotó y la imagen estaba vertical, no warning.
+- [x] 3 tests nuevos (suite: **44 passed + 1 skipped**, era 41+1).
+- [x] Deploy via `scripts/upload_to_space.py` (commit atomico con shim
+      raiz + modulo en su ubicacion correcta — error de path-in-repo en
+      el primer deploy se corrigio con un segundo commit que restauro
+      el shim raiz).
+- [x] Smoke remoto verde: **N_61 (rotacion +13°) reporta 0° Normal**,
+      eliminando el falso positivo del 5.4. N_61 sin rotacion sigue con
+      warning del 5.4. N_1, S_22 (rotacion=0) byte-identicos al 5.4.
+
+**Hallazgo importante**: al probar N_61 con rotacion `-13°` (la
+direccion que sugeria el plan inicial de auto-rotacion basado en
+`-tilt_deg`), el tilt EMPEORO de 13.1° a 25.1°. La direccion correcta
+era `+13°`. Esto confirma post-hoc que el approach auto-rotation era
+peligroso: la convencion de signo entre `compute_orientation_info` y
+`cv2.getRotationMatrix2D` no es trivial, y haber adivinado mal habria
+sumado curvas fantasma en vez de quitarlas. El control manual le da
+al medico el feedback visual para acertar la direccion en una sola
+intervencion.
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 15.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -503,3 +550,5 @@ Orden corto:
 | 2026-05-19 (Ciclo 5.4) | `MIN_IP_Y_DISTANCE_PX = 30` para filtrar pares de inflection points sub-vertebrales | El sweep del Ciclo 5.3 dejaba pasar curvas con IPs separadas <30 pts en el grid del spline (500-pt span). Esos pares producian Cobb numericamente valido (>min_curve_deg) pero anatomicamente espurios — la wiggle del spline sub-vertebra. En S_22 esto generaba "5.9° T9-T9" como secundaria espuria. 30 pts ~= 6% del alto, ~= 1 vertebra a 512x512. Curvas mas cortas se filtran como spline noise. |
 | 2026-05-19 (Ciclo 5.4) | Eliminar (no marcar) curvas con `upper_vertebra == lower_vertebra` despues del label transfer | El filtro y-distance pasa la mayoria de los espurios, pero el label transfer nearest-y puede aun colapsar 2 IPs distintos al mismo centroide multiclass si la deteccion multiclass es poco densa en esa zona. Resultado: "T9-T9" como nombre cuando T9 es la unica vertebra cercana en y. Eliminar in-place + reindexar `rank` (en `assign_vertebra_names_to_curves`) + resync `cobb_angle_deg`/`inflection_points` en inference.py si la principal fue eliminada. Curvas con names == None (sin multiclass) NO se filtran — todavia llevan info geometrica util. |
 | 2026-05-19 (Ciclo 5.4) | Dedup de rotulos por nombre de vertebra + anti-overlap por desplazamiento vertical | Cuando 2 curvas comparten vertebra (T9 = lower principal + upper secundaria), el codigo previo dibujaba 4 textos `[Principal] Inferior (T9)`, `[Secundaria] Superior (T9)`, etc. en el mismo `text_y`, produciendo una pared ilegible. Solucion en 2 capas: (1) dedup por `v["name"]` — si ya hay rotulo de una curva anterior, omitir; la geometria (boxes/perps/arco) sigue dibujada. (2) Si el rotulo nuevo colisionaria con un rect placed, desplazar `text_y` 16px abajo iterativamente hasta encajar o salir del frame. Acumuladores `labeled_vertebrae: set` y `placed_label_rects: list` se instancian en `draw_cobb_angle_visualization` y se pasan al helper por cada curva. |
+| 2026-05-19 (Ciclo 5.5) | Control manual de rotacion en la UI (slider + 5 botones rapidos) en lugar de auto-rotacion | Auto-rotacion habria sido riesgosa: (a) S_100/S_150 borderline (tilt 12.6/12.8°) habrian sido rotados, posiblemente cambiando magnitudes anatomicas; (b) la convencion de signo entre `compute_orientation_info` (que usa SVD + arctan2 + wrap a (-90, 90]) y `cv2.getRotationMatrix2D` (positive=CCW) no es trivial — empiricamente confirme que `-tilt_deg` EMPEORA la rotacion en N_61, no la corrige. El control manual (slider -180..180 + 5 botones) elimina ambos problemas: el medico ve la imagen, decide si rotar, ajusta y obtiene feedback visual antes de Analyze. Generaliza ademas a rotaciones grandes (90° = radiografia atravesada) que ningun threshold automatico habria capturado. El warning del 5.4 sigue activo como guia post-rotacion ("you rotated, still tilted X°"). |
+| 2026-05-19 (Ciclo 5.5) | Helper `rotate_image_for_analysis` con `BORDER_REPLICATE` y deadband 0.5° | `BORDER_REPLICATE` rellena bordes con el pixel mas cercano del original — para una radiografia donde el fondo ya es oscuro uniforme, produce un fade limpio en vez de bandas negras que el binary segmenter podria confundir con la cavidad toracica. Deadband 0.5° evita que el slider sentado en 0 pague el costo de `cv2.warpAffine` (que introduce ruido sub-pixel de interpolacion bilinear en cada llamada). Cero cambios en el pipeline interno — toda la cirugia es en el callback de Gradio. |
