@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-17 noche | Ciclos: 1, 2, 3, 4, 5 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -214,6 +214,41 @@ ideas de visualizacion + fusion de mediciones.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md)
 
+### Ciclo 5.3 ✅ COMPLETO — Cobertura del binary + UX informativa (sin reentrenar)
+Motivado por una prueba manual en `S_22` (S-shape clara): el binary solo cubrio
+C6-T10 (~12 de 22 vertebrae), el spline se ajusto a la mitad superior casi recta
+y la app reporto "0° — no clinically meaningful curves" cuando el ojo clinico ve
+dos curvas. Cuello de botella = cobertura, no severidad ni algoritmo.
+
+- [x] **Fix A** ([inference.py:117](spine_segmentation/deployment/inference.py)):
+      umbral del binary 0.5 → 0.3 (acepta pixeles marginales en zona lumbar).
+- [x] **Fix B** ([morphology.py:clean_binary_mask](spine_segmentation/postprocessing/morphology.py)):
+      cierre morfologico vertical con kernel rect (3, 25) **antes** del "keep
+      largest connected component". Puentea fragmentos lumbar↔toracico que
+      antes se perdian al filtrar por componente mas grande.
+- [x] **Fix C+D** ([cobb_angle.py](spine_segmentation/evaluation/cobb_angle.py)):
+      defaults `smoothing_factor` 5000 → 1500 + `min_curve_deg` 3.0 → 2.0.
+      Spline mas sensible captura inflexiones sutiles.
+- [x] **Multi-pass adaptativo** (cobb_angle.py): si la primera pasada encuentra
+      solo 1 curva, re-corre con `smoothing_factor * 3.3` y prefiere lo que de
+      mas curvas. Reconcilia S_22 (necesita smoothing bajo) con S_100 (necesita
+      smoothing alto para preservar S-shape).
+- [x] **Fix F** (`evaluation/coverage.py` nuevo + integracion en inference.py +
+      `build_results_text` en app.py): nuevo helper `compute_coverage_info`
+      retorna y-range del binary + ratio + nombres de vertebrae cubiertas
+      (mapeo nearest-y vs multiclass) + flag `is_partial`. UI emite bloque
+      "=== COVERAGE === / Binary mask covers: C6-T10 (12 of ~22, ~88%) /
+      WARNING: ... NOT segmented ..." cuando `is_partial=True`. Assessment
+      cambia a "Inconclusive — insufficient coverage" cuando partial + 0°.
+- [x] 7 tests nuevos (suite: 32 passed + 1 skipped, era 25+1).
+- [x] Deploy via `scripts/upload_to_space.py` (5 archivos, commit atomico).
+- [x] Smoke remoto verde sobre 9 casos: N_1, S_22, S_21, S_100, S_45, S_77,
+      S_120, S_130, S_150. **S_22 ahora detecta 2 curvas (19.5° toracica +
+      5.9° lumbar) + WARNING de coverage en vez de "0° Normal" engañoso.**
+      S_100 mantiene 2 curvas (83°+61°) — sin regresion.
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 13.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -409,3 +444,7 @@ Orden corto:
 | 2026-05-17 noche (Ciclo 5.1) | Convencion de color RGB (no BGR) en visualizaciones que pasan por Gradio | La imagen llega a `draw_cobb_angle_visualization` como RGB (Gradio convencion). cv2 no transforma color spaces — solo escribe los 3 valores en orden. Pasar `(0, 0, 255)` (rojo BGR canonical) en un array RGB pinta AZUL puro. Todas las llamadas cv2 que esperan rojo usan ahora `(255, 0, 0)`; similar para amarillo `(255, 255, 0)`. Detectado por smoke remoto que encontro 0 red pixels. |
 | 2026-05-17 noche (Ciclo 5.2) | `cobb_from_binary` devuelve `curves: list[dict]`, no un solo angulo | El algoritmo original solo usaba los 2 inflection points mas extremos del spline y reportaba UN angulo. Para escoliosis con doble curva (S-shape, comun en pacientes con curva toracica principal + curva lumbar compensatoria, como describe Julian Florido en su ejemplo de informe radiologico real), la segunda curva nunca aparecia en el reporte. Ahora se calcula un Cobb por cada par adyacente de IPs, se filtra debajo de 3° (ruido), y se ordenan por magnitud. Confirmado en smoke remoto con S_100: detecta 84° toracica + 65° lumbar. |
 | 2026-05-17 noche (Ciclo 5.2) | Multiclass solo para naming + ilustracion, no para Assessment | Su Dice 0.34 (y el de Julian 0.09) son insuficientes para calcular Cobb por endplate. El multiclass se mantiene en el pipeline porque sus mascaras dan info anatomica (que vertebrae componen cada curva del binary) — `assign_vertebra_names_to_curves` hace label-transfer por nearest-y. Assessment severidad usa la curva mayor del binary, no el multiclass. |
+| 2026-05-19 (Ciclo 5.3) | Cierre morfologico vertical en `clean_binary_mask`, antes del filtro por componente mayor | Cases tipo S_22 (S-shape rotoescoliosis con señal lumbar debil) producian un binary mask en dos fragmentos: uno toracico fuerte y otro lumbar tenue. El "keep largest connected component" descartaba el lumbar antes de poder pegarlo, y el spline se ajustaba solo a la mitad superior. Un kernel rect (3, 25) — alto y angosto — alcanza ~12 px arriba y ~12 px abajo: suficiente para puentear gaps lumbar tipicos (10-20 px en 512x512), demasiado angosto para arrastrar costillas o pelvis. El orden (cerrar antes de filtrar) es lo critico. |
+| 2026-05-19 (Ciclo 5.3) | Multi-pass adaptativo en `cobb_from_binary` (smoothing usuario + retry con smoothing*3.3 si solo 1 curva) | El sweep contra el dataset mostro que NO existe un solo `smoothing_factor` que funcione para todos los casos: S_22 (S-shape sutil + coverage parcial) necesita smoothing bajo (~1500) para que el spline conserve las inflexiones; S_100 (S-shape severa, principal 84° + lumbar 65°) necesita smoothing alto (~5000) para que el spline no fusione las dos curvas. Solucion: refactor a `_cobb_from_binary_single_pass` + envoltorio que corre la pasada del usuario primero y reintenta con higher smoothing cuando encuentra exactamente 1 curva. Costo computacional cero en casos triviales (0 curvas) o ya-multi-curva (≥2 curvas). Preserva el comportamiento de Ciclo 5.2 en S_100 sin perder la sensibilidad nueva en S_22. |
+| 2026-05-19 (Ciclo 5.3) | `compute_coverage_info` como modulo aparte (`evaluation/coverage.py`) y no dentro de `morphology.py` | La cobertura combina datos del binary (y-range, ratio) con la info anatomica del multiclass (nombres de vertebrae). No es estrictamente una operacion morfologica — es analisis del resultado de la segmentacion + label-transfer. Vive junto a `cobb_angle.py` porque son del mismo nivel conceptual (evaluation/) y comparten consumidor (build_results_text). El helper retorna `vertebrae_in_range`, `vertebrae_below_range`, `vertebrae_above_range` para que la UI pueda escribir "Lower spine (T11-L5) NOT segmented" en vez de un warning generico. |
+| 2026-05-19 (Ciclo 5.3) | Assessment "Inconclusive - insufficient coverage" cuando partial + 0° | El bug original era que con `coverage_ratio < 0.7` y `cobb_angle_deg = 0`, el Assessment decia "Normal (< 10 degrees)" — falso negativo clinico. La nueva rama lo flag-ea como inconcluyente para que el medico revise la segmentacion antes de confiar en el numero. La rama solo se dispara con AMBAS condiciones (partial + ~0°) para no contaminar casos sanos verdaderos (N_1: coverage full + 0° -> sigue siendo "Normal"). |

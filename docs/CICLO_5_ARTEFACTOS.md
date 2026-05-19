@@ -1,11 +1,13 @@
 # Ciclo 5 — UX clinica del Cobb · Artefacto de Salida
 
 > **Fecha de cierre:** 2026-05-17 noche (Ciclo 5) + 5.1 polish la misma noche
-> **Estado:** ✅ COMPLETO
+> **Estado:** ✅ COMPLETO (con addenda 5.1 + 5.2 + 5.3)
 > **URL pública:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 > **Próximo ciclo (tentativo):** Ciclo 6 — Refinamiento del modelo, entrega académica final, sustentación.
 >
 > **Addendum 5.1** (mismo día): polish de la visualización del Cobb. Ver sección 11.
+> **Addendum 5.2** (mismo día): detección multi-curva (rotoescoliosis). Ver sección 12.
+> **Addendum 5.3** (2026-05-19): cobertura del binary + UX informativa. Ver sección 13.
 
 ---
 
@@ -400,3 +402,131 @@ Suite final: **25 passed + 1 skipped** (era 21 + 1 antes del 5.2).
   en detectar (por ejemplo) T8, la curva con IP cerca de T8 reciba el
   nombre de T7 o T9 (el más cercano). Mejora poco con el multiclass actual
   (Dice 0.34).
+
+---
+
+## 13. Addendum 5.3 — Cobertura del binary + UX informativa (sin reentrenar)
+
+> **Fecha:** 2026-05-19.
+> **Motivación:** Elvis probó manualmente `S_22` (caso del dataset Scoliosis
+> con S-shape clara). El modelo binary solo segmentó C6-T10 (~12 de 22
+> vértebras), el spline se ajustó solo a la mitad superior casi recta, y la
+> app reportó "0° — no clinically meaningful curves" cuando el ojo clínico
+> ve dos curvas. Cuello de botella = **cobertura de la segmentación
+> binaria**, no severidad ni algoritmo multi-curva.
+
+### Diagnóstico
+
+`S_22` produce una probabilidad binaria fuerte en la zona torácica
+(>0.5) y débil pero presente en la zona lumbar (~0.3-0.4). Con el umbral
+Ciclo 5.2 de 0.5, los píxeles lumbares se descartan. Aunque queden dos
+fragmentos (toracico + lumbar tenue), `clean_binary_mask` filtraba por
+"largest connected component" ANTES de cualquier operación de cierre, así
+que el fragmento lumbar se perdía silenciosamente. El spline se ajustaba
+solo a la mitad superior (casi recta), `cobb_from_binary` reportaba 0° y
+la UI decía "Normal" — falso negativo clínico.
+
+### Cambios
+
+| Fix | Archivo | Detalle |
+|---|---|---|
+| **A** | [inference.py:117](../spine_segmentation/deployment/inference.py) | Umbral `binary_prob > 0.5` → `> 0.3`. Acepta píxeles marginales en zona lumbar. |
+| **B** | [postprocessing/morphology.py](../spine_segmentation/postprocessing/morphology.py) | Cierre morfológico vertical (`cv2.MORPH_RECT (3, 25)`) insertado entre `MORPH_OPEN` y "keep largest CC". Puentea fragmentos torácico↔lumbar antes de filtrar. |
+| **C** | [evaluation/cobb_angle.py](../spine_segmentation/evaluation/cobb_angle.py) | Default `smoothing_factor` 5000 → 1500. Spline más sensible captura inflexiones en curvas leves. |
+| **D** | misma | Default `min_curve_deg` 3.0 → 2.0. Reporta curvas compensatorias suaves. |
+| **Multi-pass** | misma | Refactor a `_cobb_from_binary_single_pass`. La envoltura corre la pasada del usuario; si encuentra exactamente 1 curva, re-corre con `smoothing*3.3` y prefiere lo que de más curvas. Reconcilia smoothing bajo (S_22) con smoothing alto (S_100). |
+| **F** | [evaluation/coverage.py](../spine_segmentation/evaluation/coverage.py) (nuevo) + app.py + inference.py | Nuevo helper `compute_coverage_info`. UI emite bloque `=== COVERAGE ===` cuando `is_partial=True`, con nombres `Cn - Tm`, ratio %, y warning `Lower/Upper spine (T11-L5) NOT segmented`. Assessment cambia a "Inconclusive — insufficient coverage" cuando partial + 0°. |
+
+### `compute_coverage_info` — API
+
+```python
+compute_coverage_info(binary_mask, multiclass_vertebrae, image_height=None) -> dict:
+    success: bool
+    top_y, bottom_y: int            # y-range del binary mask
+    coverage_ratio: float           # (bottom_y - top_y) / image_height
+    vertebrae_in_range: list[str]   # nombres con centroid_y en [top_y, bottom_y]
+    vertebrae_below_range: list[str]  # las que el binary MISSED debajo
+    vertebrae_above_range: list[str]  # las que MISSED arriba
+    n_vertebrae: int                # len(vertebrae_in_range)
+    n_expected: int                 # 22 (C3-L5)
+    is_partial: bool                # ratio < 0.7 OR (multiclass disp AND n_vert < 15)
+    upper_vertebra, lower_vertebra: str|None  # nearest-y a top/bottom
+```
+
+El multiclass se usa SOLO para naming (`extract_vertebra_info` + nearest-y),
+no para calcular cobertura. Sin multiclass disponible, `upper_vertebra` y
+`lower_vertebra` quedan en `None` pero `coverage_ratio` y `is_partial` siguen
+funcionando.
+
+### Tests añadidos (Ciclo 5.3)
+
+1. `test_clean_binary_mask_bridges_vertical_gap` — Dos fragmentos verticales
+   con gap de 20 px se unen en 1 componente conectado.
+2. `test_compute_coverage_info_reports_partial_segmentation` — Binary mask
+   parcial + vértebras dispersas → `is_partial=True`, `vertebrae_below_range`
+   poblada.
+3. `test_compute_coverage_info_reports_full_segmentation` — Binary mask de
+   ~90% + 20 vértebras → `is_partial=False`.
+4. `test_compute_coverage_info_handles_empty_mask_and_no_vertebrae` — Robustez
+   ante mask vacío / None / sin multiclass.
+5. `test_build_results_text_emits_coverage_warning_when_partial` — Texto
+   contiene "COVERAGE", "C6 - T10", "12 of ~22", "WARNING", "Lower spine".
+6. `test_build_results_text_no_coverage_warning_when_full` — Coverage llena
+   omite el bloque y el WARNING.
+7. `test_build_results_text_says_inconclusive_when_zero_cobb_and_partial` —
+   El regresión-pin clave: partial + 0° NO debe decir "Normal" sino
+   "Inconclusive".
+
+Suite final: **32 passed + 1 skipped** (era 25 + 1 antes del 5.3).
+
+### Smoke remoto (gradio_client) — 9 casos del dataset
+
+| Caso | Ciclo 5.2 | Ciclo 5.3 | Observación |
+|---|---|---|---|
+| `N_1` (Normal) | 0° "Normal" | 0° "Normal" | sin regresión ✓ |
+| **`S_22` (pivote)** | 0° "false-Normal" | **2 curvas 19.5°+5.9°, Mild + WARNING** | **FIXED — pasa de falso-negativo a verdadero-positivo ✓✓** |
+| `S_21` (mild) | 1 curva 15.1° T6-L1 | 2 curvas 30.4° + 28.9° T6-T12 + WARNING | shift por A+B (más píxeles → más curva); ambos reportes flag-ean scoliosis |
+| **`S_100` (severa)** | **2 curvas 84°+65°** | **2 curvas 83°+61°** | **multi-pass recuperó la curva secundaria — sin regresión ✓** |
+| `S_45` | 1 curva 31.7° | 2 curvas 61.7°+41.7° + WARNING | más detalle |
+| `S_77` | 1 curva 40.7° | 3 curvas 47.5°+30.9°+2.5° + WARNING | triple curve detectada |
+| `S_120` | 1 curva 55.8° | 2 curvas 63.9°+38.3° | S-shape ahora detectado |
+| `S_130` | 1 curva 75.7° | 2 curvas 80.6°+54.3° | S-shape ahora detectado |
+| `S_150` | 1 curva 54.8° | 3 curvas 54.9°+39.9°+6.8° | triple curve detectada |
+
+**Criterio de éxito cumplido**: S_22 detecta curvas y muestra el warning de
+coverage; S_100 mantiene las 2 curvas; ningún caso baja de severidad clínica
+relevante (todas las escoliosis siguen siendo escoliosis).
+
+### Commits del Ciclo 5.3
+
+- `d2fe3be` fix(inference): lower binary probability threshold to 0.3
+- `f3efda4` fix(postproc): bridge fragmented spine via vertical morphological closing
+- `7196361` feat(cobb): tune spline smoothing and noise floor for finer curve detection
+- `2082b79` feat(coverage): compute binary mask coverage and surface it in diagnosis text
+- `5e61c70` feat(cobb): multi-pass smoothing to recover Ciclo 5.2 S-shape detection
+- `<este>` docs(cycle5): close cycle 5.3 — binary coverage fixes
+
+### Limitaciones honestas
+
+- **El umbral de "partial"** (`coverage_ratio < 0.7` OR `n_vertebrae < 15`) es
+  conservador. S_21 cubre el 66% del alto y muestra el WARNING aunque
+  prácticamente abarca toda la columna (el resto es padding). El warning es
+  ligeramente sobre-sensible — preferimos un falso positivo de "review the
+  segmentation" que un falso negativo silencioso.
+- **El shift de S_21 (15° → 30°)** es real: viene de fixes A+B (más píxeles
+  en el binary → spline con más curvatura). Ambos reportes la flag-ean como
+  escoliosis (Mild vs Moderate); el MAE del binary es 23° así que un shift
+  de 15° está dentro del ruido. NO es un cambio en el diagnóstico clínico,
+  pero sí en el número exacto reportado.
+- **Direction estimate sigue ruidoso** (heredado de Ciclo 5.2). En S_100 ahora
+  reporta "izquierda" donde 5.2 reportaba "derecha". El módulo de la curva
+  se preserva; la convexidad puede oscilar con el spline más sensible.
+- **Coverage no aplica a casos sin multiclass**. Si el modelo multiclass
+  falla por completo, `upper_vertebra` / `lower_vertebra` quedan en `None` y
+  el warning degrada a un mensaje genérico. En la práctica, el multiclass
+  detecta al menos 5-10 vértebras incluso en casos difíciles.
+- **NO se reentrenó nada**. Todos los fixes son post-procesamiento. Si la
+  probabilidad binaria del modelo está realmente por debajo de 0.3 en una
+  zona, ningún umbral ni cierre morfológico la recuperará — esa es la
+  frontera natural del Ciclo 6 (fallback multiclass, fix E, o reentrenar
+  con augmentation lumbar agresivo).
