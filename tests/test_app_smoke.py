@@ -242,3 +242,173 @@ def test_binary_overlay_renders_spline_and_inflection_points():
     # Skip-path: a failed binary result must not raise.
     _draw_binary_overlay(vis, None)
     _draw_binary_overlay(vis, {"success": False, "error": "x"})
+
+
+# ----------------------------------------------------------------------------
+# Multi-curve detection — Ciclo 5.2
+# ----------------------------------------------------------------------------
+
+def test_cobb_from_binary_detects_two_curves_on_s_shape():
+    """A synthetic S-shape spine (two full sine cycles) must yield at least
+    2 curves above the noise floor. Before Ciclo 5.2 this was impossible:
+    cobb_from_binary used only the 2 extreme inflection points and dropped
+    the rest, hiding the compensatory lumbar curve from the report."""
+    import numpy as np
+    from spine_segmentation.evaluation.cobb_angle import cobb_from_binary
+
+    H, W = 800, 400
+    mask = np.zeros((H, W), dtype=np.uint8)
+    for y in range(H):
+        cx = int(W / 2 + 80 * np.sin(2 * np.pi * y / H * 2.0))  # 2 full cycles -> 3 IPs
+        mask[y, max(0, cx - 8):min(W, cx + 8)] = 1
+
+    r = cobb_from_binary(mask, smoothing_factor=1000.0)
+    assert r["success"]
+    assert len(r["curves"]) >= 2, f"expected >=2 curves, got {len(r['curves'])}"
+    # Each curve carries the required keys
+    for c in r["curves"]:
+        assert "cobb_angle_deg" in c
+        assert "ip_upper" in c and "ip_lower" in c
+        assert "direction" in c
+        assert c["cobb_angle_deg"] >= 3.0  # above the min_curve_deg floor
+    # cobb_angle_deg back-compat: principal is the largest
+    assert r["cobb_angle_deg"] == r["curves"][0]["cobb_angle_deg"]
+
+
+def test_assign_vertebra_names_to_curves_label_transfer():
+    """Each curve must receive `upper_vertebra` / `lower_vertebra` from the
+    multiclass detection by nearest-y. This is the label-transfer that lets
+    the UI say 'T5 - T12' instead of just '(?, ?)' for each curve."""
+    from spine_segmentation.evaluation.cobb_angle import assign_vertebra_names_to_curves
+
+    curves = [
+        {"ip_upper": (100.0, 50.0), "ip_lower": (110.0, 200.0)},
+        {"ip_upper": (110.0, 200.0), "ip_lower": (120.0, 380.0)},
+    ]
+    vertebrae = [
+        {"name": "T5", "centroid_y": 55.0},
+        {"name": "T10", "centroid_y": 195.0},
+        {"name": "L4", "centroid_y": 375.0},
+    ]
+    enriched = assign_vertebra_names_to_curves(curves, vertebrae)
+    assert enriched[0]["upper_vertebra"] == "T5"
+    assert enriched[0]["lower_vertebra"] == "T10"
+    assert enriched[1]["upper_vertebra"] == "T10"
+    assert enriched[1]["lower_vertebra"] == "L4"
+
+    # Empty multiclass -> None labels, no crash.
+    curves2 = [{"ip_upper": (0.0, 0.0), "ip_lower": (0.0, 100.0)}]
+    enriched2 = assign_vertebra_names_to_curves(curves2, [])
+    assert enriched2[0]["upper_vertebra"] is None
+    assert enriched2[0]["lower_vertebra"] is None
+
+
+def test_build_results_text_multi_curve_layout():
+    """When cobb_binary carries a 2-curve list, the text must list both with
+    direction + vertebra names, mention 'S-curve', and pick the Assessment
+    from the principal (largest) curve."""
+    from spine_segmentation.deployment.app import build_results_text
+
+    text = build_results_text(
+        cobb_binary={
+            "success": True,
+            "cobb_angle_deg": 32.0,
+            "curves": [
+                {
+                    "cobb_angle_deg": 32.0,
+                    "upper_vertebra": "T5",
+                    "lower_vertebra": "T12",
+                    "direction": "right",
+                    "rank": 1,
+                },
+                {
+                    "cobb_angle_deg": 17.5,
+                    "upper_vertebra": "T12",
+                    "lower_vertebra": "L4",
+                    "direction": "left",
+                    "rank": 2,
+                },
+            ],
+        },
+        cobb_multiclass={
+            "success": True, "cobb_angle_deg": 28.0,
+            "upper_end_vertebra": "T6", "lower_end_vertebra": "L1",
+        },
+    )
+
+    assert "Curva principal" in text
+    assert "Curva secundaria" in text
+    assert "T5 - T12" in text
+    assert "T12 - L4" in text
+    assert "convexidad derecha" in text
+    assert "convexidad izquierda" in text
+    # S-curve descriptor and curve count.
+    assert "S-shape" in text or "S-curve" in text or "doble curva" in text
+    assert "Numero total de curvas detectadas: 2" in text
+    # Assessment is based on the principal angle (32 -> Moderate).
+    assert "Moderate" in text
+    assert "Binary principal" in text
+
+
+def test_draw_cobb_visualization_multi_curve_uses_two_colors():
+    """When 2 curves are supplied, the visualization must use BOTH the
+    principal red (255, 0, 0) and the secondary magenta (255, 100, 200).
+    This is what tells the radiologist apart from a single-curve case."""
+    import numpy as np
+    from spine_segmentation.evaluation.visualize import draw_cobb_angle_visualization
+
+    h, w = 400, 200
+    mask = np.zeros((h, w), dtype=np.uint8)
+    # 3 vertebrae stacked vertically
+    mask[40:60, 80:140] = 5    # upper -> "T1"
+    mask[180:200, 80:140] = 10  # middle -> "T6"
+    mask[330:350, 80:140] = 18  # lower -> "L2"
+
+    image = np.full((h, w, 3), 90, dtype=np.uint8)
+    cobb_binary = {
+        "success": True,
+        "cobb_angle_deg": 28.0,
+        "curves": [
+            {
+                "cobb_angle_deg": 28.0,
+                "upper_vertebra": "T1",
+                "lower_vertebra": "T6",
+                "direction": "right",
+                "rank": 1,
+                "ip_upper": (110.0, 50.0),
+                "ip_lower": (110.0, 190.0),
+            },
+            {
+                "cobb_angle_deg": 14.0,
+                "upper_vertebra": "T6",
+                "lower_vertebra": "L2",
+                "direction": "left",
+                "rank": 2,
+                "ip_upper": (110.0, 190.0),
+                "ip_lower": (110.0, 340.0),
+            },
+        ],
+    }
+    cobb_multi = {
+        "success": True,
+        "cobb_angle_deg": 25.0,
+        "upper_end_vertebra": "T1",
+        "lower_end_vertebra": "L2",
+    }
+    vis = draw_cobb_angle_visualization(
+        image=image,
+        multiclass_mask=mask,
+        cobb_multiclass_result=cobb_multi,
+        cobb_binary_result=cobb_binary,
+    )
+
+    # Red pixels (255, 0, 0) — principal curve.
+    red = (vis[..., 0] > 200) & (vis[..., 1] < 60) & (vis[..., 2] < 60)
+    assert red.sum() > 20, f"expected red pixels for principal, got {red.sum()}"
+    # Magenta pixels around (255, 100, 200) — secondary curve.
+    magenta = (
+        (vis[..., 0] > 200)
+        & (vis[..., 1] > 40) & (vis[..., 1] < 180)
+        & (vis[..., 2] > 130)
+    )
+    assert magenta.sum() > 20, f"expected magenta pixels for secondary, got {magenta.sum()}"
