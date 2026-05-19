@@ -18,7 +18,15 @@ from spine_segmentation.models.smp_models import create_model
 from spine_segmentation.data.transforms import resize_with_padding, get_inference_transforms
 from spine_segmentation.data.class_mapping import get_class_names, get_num_classes
 from spine_segmentation.postprocessing.morphology import clean_binary_mask, clean_multiclass_mask
-from spine_segmentation.evaluation.cobb_angle import cobb_from_binary, cobb_from_multiclass
+from spine_segmentation.evaluation.cobb_angle import (
+    assign_vertebra_names_to_curves,
+    cobb_from_binary,
+    cobb_from_multiclass,
+)
+from spine_segmentation.postprocessing.vertebra_ordering import (
+    compute_endplate_angles,
+    extract_vertebra_info,
+)
 
 
 class SpineSegmentationPipeline:
@@ -133,6 +141,19 @@ class SpineSegmentationPipeline:
             cobb_result = cobb_from_multiclass(multi_mask, self.scheme)
             results["cobb_multiclass"] = cobb_result
             results["vertebrae_detected"] = cobb_result.get("vertebrae_detected", [])
+
+            # Cycle 5.2: enrich every binary-detected curve with vertebra names
+            # using the multiclass detection (label transfer). The multiclass
+            # mask is noisy for Cobb computation but useful for NAMING.
+            if (
+                results.get("cobb_binary")
+                and results["cobb_binary"].get("curves")
+            ):
+                vertebrae = extract_vertebra_info(multi_mask, self.class_names)
+                vertebrae = compute_endplate_angles(vertebrae)
+                assign_vertebra_names_to_curves(
+                    results["cobb_binary"]["curves"], vertebrae
+                )
 
         # Create Cobb angle visualization
         results["cobb_visualization"] = self._create_cobb_visualization(results, image_resized)

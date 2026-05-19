@@ -32,33 +32,77 @@ from spine_segmentation.data.class_mapping import get_class_names
 # (Replicates and improves the previous semester's approach)
 # ============================================================================
 
+def _cobb_between_inflection_points(dx_dy: np.ndarray, ip_a: int, ip_b: int) -> float:
+    """Cobb angle (deg) between the tangent slopes at two inflection-point indices.
+
+    Uses the standard formula: angle = arctan((m1 - m2) / (1 + m1 * m2)).
+    Returns 90 deg when the lines are perpendicular (within tolerance).
+    """
+    m1 = float(dx_dy[ip_a])
+    m2 = float(dx_dy[ip_b])
+    denom = 1.0 + m1 * m2
+    if abs(denom) < 1e-10:
+        return 90.0
+    return float(abs(np.degrees(np.arctan((m1 - m2) / denom))))
+
+
+def _curve_direction(dx_dy: np.ndarray, ip_a: int, ip_b: int) -> str:
+    """Convexity direction of a curve between two inflection points.
+
+    Sign of the slope at the midpoint indexes the side the curve bulges to.
+    Negative slope (x decreases with y in our `x = f(y)` parameterization, which
+    in image coords means the spine moves LEFT as we go down) -> convexity
+    "right" (the curve apex bulges to the right). Positive -> "left".
+    Returns "unknown" if the indices are bad.
+    """
+    if ip_b <= ip_a or ip_b >= len(dx_dy):
+        return "unknown"
+    mid_idx = (ip_a + ip_b) // 2
+    mid_slope = float(dx_dy[mid_idx])
+    if abs(mid_slope) < 1e-3:
+        return "neutral"
+    return "right" if mid_slope < 0 else "left"
+
+
 def cobb_from_binary(
     binary_mask: np.ndarray,
     smoothing_factor: float = 5000.0,
+    min_curve_deg: float = 3.0,
 ) -> dict:
-    """
-    Calculate the Cobb angle from a binary spine segmentation mask.
+    """Calculate the Cobb angle from a binary spine segmentation mask, with
+    support for multiple curves (S-shape, triple).
 
     Pipeline:
     1. Clean mask
     2. Skeletonize
     3. Fit B-spline to skeleton points
     4. Compute first and second derivatives
-    5. Find inflection points (second derivative zero crossings)
-    6. Calculate Cobb angle from tangent slopes at inflection points
+    5. Find ALL inflection points (second derivative zero crossings)
+    6. For EACH adjacent pair of inflection points, compute a Cobb angle.
+       Filter out curves below `min_curve_deg` (noise), sort by magnitude.
 
     Args:
         binary_mask: (H, W) binary spine mask {0, 1}
         smoothing_factor: B-spline smoothing parameter
+        min_curve_deg: ignore curves below this angle (default 3 deg ~= noise)
 
     Returns:
-        dict with cobb_angle_deg, inflection_points, spline_points, etc.
+        dict with:
+          - cobb_angle_deg (float): back-compat; the angle of the principal curve.
+          - curves (list[dict]): one entry per detected curve, sorted desc by angle.
+            Each entry: cobb_angle_deg, ip_upper (x, y), ip_lower (x, y),
+            slope_upper, slope_lower, direction ("right"|"left"|"neutral"|"unknown"), rank.
+          - all_inflection_points (list[(x, y)]): every IP, useful for the binary overlay.
+          - inflection_points (list[(x, y)]): the 2 extremes of the principal curve (back-compat).
+          - spline_x, spline_y: the fitted curve (list of floats).
     """
     result = {
         "cobb_angle_deg": None,
         "method": "binary_skeleton",
         "success": False,
         "error": None,
+        "curves": [],
+        "all_inflection_points": [],
     }
 
     try:
@@ -97,50 +141,111 @@ def cobb_from_binary(
         dx_dy = spline.derivative(n=1)(y_eval)    # First derivative
         d2x_dy2 = spline.derivative(n=2)(y_eval)  # Second derivative
 
-        # Step 5: Find inflection points (zero crossings of second derivative)
+        # Step 5: Find ALL inflection points (zero crossings of second derivative)
         sign_changes = np.where(np.diff(np.sign(d2x_dy2)))[0]
 
         if len(sign_changes) < 2:
-            # Try with less smoothing
+            # Try with less smoothing — picks up subtler curves
             spline2 = UnivariateSpline(unique_y, unique_x, s=smoothing_factor / 5, k=3)
+            x_eval = spline2(y_eval)
             dx_dy = spline2.derivative(n=1)(y_eval)
             d2x_dy2 = spline2.derivative(n=2)(y_eval)
             sign_changes = np.where(np.diff(np.sign(d2x_dy2)))[0]
 
+        result["spline_x"] = x_eval.tolist()
+        result["spline_y"] = y_eval.tolist()
+        result["all_inflection_points"] = [
+            (float(x_eval[i]), float(y_eval[i])) for i in sign_changes
+        ]
+
         if len(sign_changes) < 2:
+            # Truly straight spine: 0 or 1 inflection points -> no curve at all.
             result["error"] = "Could not find enough inflection points"
             result["cobb_angle_deg"] = 0.0
             result["success"] = True
             return result
 
-        # Step 6: Calculate Cobb angle
-        # Use the two outermost inflection points
-        ip1_idx = sign_changes[0]
-        ip2_idx = sign_changes[-1]
+        # Step 6: For EACH adjacent pair of inflection points, compute a Cobb.
+        # This is the key change vs the previous version, which only used the
+        # 2 outermost IPs and missed compensatory / S-shape curves.
+        candidates = []
+        for i in range(len(sign_changes) - 1):
+            ip_a = int(sign_changes[i])
+            ip_b = int(sign_changes[i + 1])
+            angle = _cobb_between_inflection_points(dx_dy, ip_a, ip_b)
+            if angle < min_curve_deg:
+                continue
+            candidates.append({
+                "cobb_angle_deg": angle,
+                "ip_upper": (float(x_eval[ip_a]), float(y_eval[ip_a])),
+                "ip_lower": (float(x_eval[ip_b]), float(y_eval[ip_b])),
+                "slope_upper": float(dx_dy[ip_a]),
+                "slope_lower": float(dx_dy[ip_b]),
+                "direction": _curve_direction(dx_dy, ip_a, ip_b),
+            })
 
-        slope1 = dx_dy[ip1_idx]
-        slope2 = dx_dy[ip2_idx]
+        if not candidates:
+            # Many small inflections but none above the noise floor.
+            result["cobb_angle_deg"] = 0.0
+            result["success"] = True
+            # Still set inflection_points (back-compat) to the 2 outermost.
+            result["inflection_points"] = [
+                result["all_inflection_points"][0],
+                result["all_inflection_points"][-1],
+            ]
+            return result
 
-        # Angle between perpendicular lines to tangents
-        # Cobb angle = angle between the two perpendicular lines
-        if abs(1 + slope1 * slope2) < 1e-10:
-            cobb_angle = 90.0
-        else:
-            cobb_angle = abs(np.degrees(np.arctan((slope1 - slope2) / (1 + slope1 * slope2))))
+        # Sort by magnitude descending and assign ranks.
+        candidates.sort(key=lambda c: c["cobb_angle_deg"], reverse=True)
+        for rank, c in enumerate(candidates, start=1):
+            c["rank"] = rank
 
-        result["cobb_angle_deg"] = float(cobb_angle)
+        principal = candidates[0]
+        result["curves"] = candidates
+        result["cobb_angle_deg"] = principal["cobb_angle_deg"]
         result["success"] = True
-        result["inflection_points"] = [
-            (float(x_eval[ip1_idx]), float(y_eval[ip1_idx])),
-            (float(x_eval[ip2_idx]), float(y_eval[ip2_idx])),
-        ]
-        result["spline_x"] = x_eval.tolist()
-        result["spline_y"] = y_eval.tolist()
+        # Back-compat: inflection_points = the 2 IPs of the principal curve.
+        result["inflection_points"] = [principal["ip_upper"], principal["ip_lower"]]
 
     except Exception as e:
         result["error"] = str(e)
 
     return result
+
+
+def assign_vertebra_names_to_curves(
+    curves: list,
+    multiclass_vertebrae: list,
+) -> list:
+    """Attach `upper_vertebra` and `lower_vertebra` names to each curve dict.
+
+    For each curve, find the multiclass-detected vertebra whose centroid_y is
+    closest to the curve's ip_upper/ip_lower y-coordinates. The multiclass model
+    is used here only for NAMING (label transfer) — it is NOT used to compute
+    the Cobb angle itself, because per-vertebra masks are too noisy on our data.
+
+    Args:
+        curves: list of dicts from `cobb_from_binary`'s "curves" key.
+        multiclass_vertebrae: list of dicts from
+            `postprocessing.vertebra_ordering.extract_vertebra_info`, each
+            carrying at least `name` and `centroid_y`.
+
+    Returns:
+        The same list with `upper_vertebra`, `lower_vertebra` keys added.
+        When no multiclass vertebrae are available, both names are None.
+    """
+    for curve in curves:
+        if not multiclass_vertebrae:
+            curve["upper_vertebra"] = None
+            curve["lower_vertebra"] = None
+            continue
+        ip_up_y = curve["ip_upper"][1]
+        ip_low_y = curve["ip_lower"][1]
+        upper = min(multiclass_vertebrae, key=lambda v: abs(v["centroid_y"] - ip_up_y))
+        lower = min(multiclass_vertebrae, key=lambda v: abs(v["centroid_y"] - ip_low_y))
+        curve["upper_vertebra"] = upper["name"]
+        curve["lower_vertebra"] = lower["name"]
+    return curves
 
 
 # ============================================================================
