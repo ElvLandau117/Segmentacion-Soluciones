@@ -72,6 +72,61 @@ def cobb_from_binary(
     """Calculate the Cobb angle from a binary spine segmentation mask, with
     support for multiple curves (S-shape, triple).
 
+    Runs `_cobb_from_binary_single_pass` with the user smoothing first. When
+    that pass finds exactly 1 curve, retries with HIGHER smoothing (less
+    wiggly spline) and prefers the retry if it surfaces more curves. This
+    multi-pass strategy (Ciclo 5.3) reconciles two empirical observations:
+
+      * Subtle / partial-coverage S-shapes (e.g. S_22) need LOW smoothing
+        (default 1500) — at smoothing 5000 the spline flattens to a near-
+        straight line and reports 0 deg, silently mis-labeling the case
+        as Normal.
+      * Severe S-shapes (e.g. S_100, ~85 deg principal + ~65 deg lumbar)
+        need HIGH smoothing — at smoothing 1500 the wiggly spline merges
+        the two anatomic curves into a single curve and the secondary
+        compensatory curve disappears from the report.
+
+    The retry recovers the Ciclo 5.2 behavior on S_100 while keeping the new
+    sensitivity for S_22-like partial-coverage cases.
+
+    Args:
+        binary_mask: (H, W) binary spine mask {0, 1}
+        smoothing_factor: B-spline smoothing parameter (user-tunable).
+        min_curve_deg: ignore curves below this angle (default 2.0,
+            Ciclo 5.3 fix D — was 3.0 in Ciclo 5.2).
+
+    Returns:
+        Same dict as `_cobb_from_binary_single_pass`. See that helper for
+        the full key list.
+    """
+    result = _cobb_from_binary_single_pass(binary_mask, smoothing_factor, min_curve_deg)
+    n_curves = len(result.get("curves") or [])
+    if n_curves >= 2:
+        # Already multi-curve at the user's smoothing — no retry needed.
+        return result
+    if n_curves != 1:
+        # 0 curves: a higher-smoothing retry is even less likely to find
+        # anything (it can only merge, never split). Bail out.
+        return result
+
+    # Retry at higher smoothing (less wiggly spline) to catch strong S-shapes
+    # whose secondary curve was merged into the principal at the default.
+    result_smooth = _cobb_from_binary_single_pass(
+        binary_mask, smoothing_factor * 3.3, min_curve_deg
+    )
+    n_smooth = len(result_smooth.get("curves") or [])
+    if n_smooth > n_curves:
+        return result_smooth
+    return result
+
+
+def _cobb_from_binary_single_pass(
+    binary_mask: np.ndarray,
+    smoothing_factor: float,
+    min_curve_deg: float,
+) -> dict:
+    """Single-pass Cobb computation; called by `cobb_from_binary`.
+
     Pipeline:
     1. Clean mask
     2. Skeletonize
@@ -80,19 +135,6 @@ def cobb_from_binary(
     5. Find ALL inflection points (second derivative zero crossings)
     6. For EACH adjacent pair of inflection points, compute a Cobb angle.
        Filter out curves below `min_curve_deg` (noise), sort by magnitude.
-
-    Args:
-        binary_mask: (H, W) binary spine mask {0, 1}
-        smoothing_factor: B-spline smoothing parameter. Lowered from 5000 to
-            1500 in Ciclo 5.3 (fix C) so subtle inflection points in mild /
-            compensatory curves are not smoothed away. The internal fallback
-            still divides this by 5 if <2 IPs are found, so a default of 1500
-            yields a fallback of 300 — aggressive but only triggered on very
-            flat splines.
-        min_curve_deg: ignore curves below this angle. Lowered from 3.0 to 2.0
-            in Ciclo 5.3 (fix D) to surface mild compensatory curves that
-            still carry clinical signal. Curves under 2 deg are likely spline
-            noise and stay filtered.
 
     Returns:
         dict with:
