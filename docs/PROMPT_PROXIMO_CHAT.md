@@ -1,24 +1,11 @@
-# Prompt para el próximo chat — Ciclos 5 + 5.1..5.8 cerrados, pendiente brief de Ciclo 6
+# Prompt para el próximo chat — Ciclo 5.9 (imagen fija de referencia clínica)
 
-> **Estado al 2026-05-20:** Ciclos 5 + 5.1 + 5.2 + 5.3 + 5.4 + 5.5 + 5.6 + 5.7 + 5.8 ✅ COMPLETOS.
-> - Assessment via binary (más robusto que multiclass).
-> - Visualización Cobb tipo Fig 1 de Shi et al. 2025.
-> - Detección multi-curva (5.2).
-> - Cobertura del binary + UI informativa (5.3).
-> - Robustez ante rotación + UX viz Cobb (5.4).
-> - Control manual de rotación (5.5).
-> - Live preview de la rotación (5.6).
-> - Limpieza multiclass del frontend + toggle ES/EN (5.7).
-> - **Polish del tab Explainability (5.8):** Grad-CAM y Confidence Map
->   ahora se enmascaran por la `binary_mask` predicha (solo pintan
->   dentro de la columna detectada), el Grad-CAM se renormaliza al
->   percentile 95 para mejor contraste, el panel side-by-side gana
->   títulos in-image y mini-colorbars, y el Markdown explicatorio se
->   tradujo a ES/EN con sección "Cómo leerlo".
-> - Smoke remoto verde. Suite: **60 passed + 1 skipped**.
->
-> **No hay handoff técnico pendiente.** El próximo chat debe definir el
-> scope del Ciclo 6 y escribir el brief en `docs/CICLO_6_BRIEF.md`.
+> **Estado al 2026-05-20:** Ciclos 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4,
+> 5.5, 5.6, 5.7, 5.8 ✅ COMPLETOS. Ciclo 5.9 planeado y aprobado por
+> Elvis — añadir una imagen fija de referencia (mockup educativo del
+> compañero médico) en la pestaña Explainability, bilingüe ES + EN.
+> El plan completo vive en
+> `C:\Users\User\.claude\plans\estas-en-modo-planificacion-piped-crayon.md`.
 
 ---
 
@@ -31,84 +18,121 @@ U. Andes, Coursera).
 ### Onboarding obligatorio (lee primero en este orden)
 
 1. `AGENTS.md` — memoria persistente (sección 5 = estado de los ciclos).
+   Al cierre del Ciclo 5.8, todos los ciclos 1–5.8 están ✅ completos.
 2. `WORKFLOW.md` — reglas no negociables del repo.
 3. `docs/CICLO_5_ARTEFACTOS.md` — qué se entregó en Ciclos 5 + 5.1..5.8.
-   Lee especialmente la sección 18 (explainability polish: masking +
-   colorbars + bilingüe).
+   Lee especialmente la **sección 18** (Explainability polish del 5.8:
+   masking de Grad-CAM + Confidence, colorbars, markdown bilingüe).
 4. `docs/CICLO_4_ARTEFACTOS.md` — qué se entregó en el Ciclo 4 (despliegue).
 5. `README.md` — visión general + URL pública del Space.
 
-### Estado actual (2026-05-20)
+### Estado actual (al cierre del Ciclo 5.8)
 
-**Ciclos 1-5.8 ✅ COMPLETOS:**
+✅ App pública: `https://huggingface.co/spaces/ElvLandau/spine-segmentation`.
+✅ Toggle ES/EN funcional (default Español) — header markdown +
+   explainability markdown + diagnosis report bilingües.
+✅ Pestaña Cobb Angle: detección multi-curva, viz tipo Fig 1 Shi et al.,
+   slider de rotación con live preview + 5 botones rápidos.
+✅ Pestaña Explainability (5.8): Grad-CAM y Confidence enmascarados por
+   la columna detectada, percentile-clip p95 en cam, títulos in-image
+   + colorbars verticales por subpanel.
+✅ Suite pytest: 60 passed + 1 skipped.
+✅ main local + origin sincronizados en `b2d293b`.
 
-- App pública: `https://huggingface.co/spaces/ElvLandau/spine-segmentation`.
-- Pesos en HF Hub: `ElvLandau/spine-checkpoints`.
-- 4 tabs operativos (Binary, Vertebrae, Cobb, Explainability) con disclaimer.
-- Gradio 5.50.0 + huggingface_hub>=0.33.5 + Python 3.11.
-- **60 tests** pasando (1 gated por checkpoints locales).
-- Mecanismo reproducible de updates: `scripts/upload_to_space.py` (con
-  `--path-in-repo` explícito siempre).
-- UX clínica Cobb completa.
-- Rotación end-to-end (5.4 + 5.5 + 5.6): detección + control manual + live preview.
-- Multiclass cleanup + toggle ES/EN (5.7).
-- **Explainability polish (5.8):** Grad-CAM y Confidence enmascarados
-  por la columna detectada (cero pintura fuera del spine), percentile-clip
-  p95 en cam para contraste, títulos + colorbars in-image, markdown
-  bilingüe con sección "Cómo leerlo".
+### Tarea para este chat: Ciclo 5.9 — Imagen fija de referencia clínica en Explainability
 
-### Lo que sigue (Ciclo 6)
+Mi compañero médico hizo un **mockup educativo** del panel
+Explainability con 5 anotaciones numeradas (hot-spots, trayectoria
+esperada, activaciones fuera de spine, zonas de alta confianza, bordes
+de menor certeza) + colorbars con interpretación + disclaimer. Quiero
+dejarlo **fijo** en la pestaña Explainability del Space — siempre
+visible, encima del panel dinámico — para que cualquier médico que abra
+la app sepa cómo interpretar lo que ve.
 
-El Ciclo 5 + sus 8 addenda están cerrados. El Ciclo 6 NO tiene brief
-todavía. Candidatos identificados:
+**Acción inmediata**: te adjunto la imagen del mockup en español. Tu
+trabajo es:
 
-1. **Recalibrar threshold de tilt** (12° → 14-15°). S_100/S_150
-   (escoliosis severas con tilt ~12.6°) disparan el ROTATION WARNING
-   aunque la curva es real. Confuso post-rotación manual.
-2. **Fallback multiclass cuando binary cubre poco** (fix E del Ciclo 5.3
-   plan original). Útil cuando el binary no detecta zona lumbar.
-3. **Reentrenamiento con augmentation lumbar agresivo** — CLAHE, crop
-   variable, gamma, contrast jitter centrados en el tercio inferior.
-   Considerar pre-training RadImageNet.
-4. **Seg-Grad-CAM auténtico** en vez de Grad-CAM vanilla con
-   `SemanticSegmentationTarget`. El 5.8 mejoró el render pero el cam
-   subyacente sigue siendo el mismo algoritmo. Cambiar requeriría
-   añadir `compute_cam_per_layer` con upsampling.
-5. **Recalibrar el umbral `is_partial` del Coverage** (Ciclo 5.3). El
-   default actual marca S_21 como parcial aunque cubre la columna
-   completa (es padding lo que reduce el ratio).
-6. **Flip horizontal/vertical en la UI** — para radiografías espejadas.
-7. **i18n Nivel C** — traducir también tabs, slider y botones rápidos.
-8. **Live preview de la SEGMENTACIÓN** (no solo de la rotación) —
-   mostrar overlay binario en tiempo real conforme el slider cambia.
-9. **Colorbar con valores numéricos** en explainability (actualmente
-   solo "Alta/Baja" — añadir 0.25, 0.5, 0.75 si cabe).
-10. **Quantización INT8 para tablet** (modelo ligero para edge).
-11. **CI con GitHub Actions** — automatizar `pytest` + lint en cada PR.
-12. **Sustentación oral + slides + demo en vivo + smoke test cross-device.**
-13. **Artículo IEEE/ACM** — si los resultados del refinamiento lo soportan.
+1. **Guardar la imagen ES** en
+   `spine_segmentation/deployment/assets/explainability_reference_es.png`
+   (crea la carpeta `assets/` si no existe).
 
-**Acción recomendada para el próximo chat:**
+2. **Generar la versión en inglés** con las mismas strings traducidas
+   (el plan en
+   `C:\Users\User\.claude\plans\estas-en-modo-planificacion-piped-crayon.md`
+   tiene la tabla ES → EN de todas las strings del mockup, en la sección
+   "Strings del mockup a traducir"). Guárdala en
+   `spine_segmentation/deployment/assets/explainability_reference_en.png`.
 
-1. Leer los 5 archivos del onboarding.
-2. Conversar con Elvis para priorizar 1-3 items del Ciclo 6.
-3. Discutir honestamente qué es viable vs aspiracional (no decir sí a todo).
-4. Escribir `docs/CICLO_6_BRIEF.md`.
-5. Empezar la primera unidad.
+3. **Wire el componente UI** en
+   `spine_segmentation/deployment/app.py`: añadir un `gr.Image` con la
+   imagen de referencia **arriba** del `explain_output` dinámico
+   actual. El componente debe ser `interactive=False`,
+   `show_download_button=False`, `height=300`.
 
-### Restricciones operativas (recordatorio)
+4. **Añadir helper en i18n**:
+   `explain_reference_path(lang)` retorna el path al PNG correcto.
+
+5. **Extender** `language_radio.change` para que también actualice el
+   `reference_image.value` cuando el usuario togglea ES/EN.
+
+6. **Tests**: 2 nuevos en `tests/test_app_smoke.py`:
+   - Ambos PNGs existen y son no-vacíos.
+   - `explain_reference_path("es")` y `("en")` retornan paths
+     distintos.
+
+7. **Deploy** via `scripts/upload_to_space.py` (con
+   `--path-in-repo` explícito para cada archivo — lección del 5.5).
+
+8. **Cierre**: actualizar AGENTS.md sec 5 + sec 9, añadir Addendum sec
+   19 a `docs/CICLO_5_ARTEFACTOS.md`, refresh este
+   `docs/PROMPT_PROXIMO_CHAT.md`, merge fast-forward a main, push a
+   origin.
+
+**Para la generación de la versión EN**: prefiero approach A (PIL
+overlay sobre la ES) si las coordenadas de texto son claras. Si no,
+approach B (recrear con matplotlib). La consistencia visual con el
+mockup original es importante para que se mantenga el "look médico"
+del diseño.
+
+**Mimetizar la viz real (panel dinámico)**: NO en este ciclo. La
+imagen fija es suficiente como leyenda; nuestro panel dinámico ya está
+bien con el masking del 5.8. Si después de probar Elvis quiere
+anotaciones numéricas sobre los hot-spots del cam, eso es Ciclo 6.
+
+### Strings del mockup a traducir (referencia rápida)
+
+| Español (original) | English (traducción) |
+|---|---|
+| 1. Mayor activación del modelo | 1. Highest model activation |
+| Zonas cálidas (rojo/amarillo) indican las regiones que más influyeron en la predicción. | Warm zones (red/yellow) show the regions that most influenced the prediction. |
+| 2. Trayectoria esperada de la columna | 2. Expected spine trajectory |
+| El modelo centra su atención en la columna vertebral, siguiendo su curvatura anatómica. | The model focuses on the vertebral column, following its anatomical curvature. |
+| 3. Activación fuera de la región anatómica | 3. Activation outside the anatomical region |
+| Se observa activación en zonas externas a la columna (bordes, artefactos o estructuras no relevantes). | Activation appears outside the spine (borders, artifacts, or irrelevant structures). |
+| 4. Alta confianza en la trayectoria segmentada | 4. High confidence in the segmented trajectory |
+| Las zonas verdes indican alta certeza del modelo en la predicción píxel a píxel. | Green zones indicate high model certainty in the pixel-by-pixel prediction. |
+| 5. Bordes de menor certeza | 5. Lower-certainty edges |
+| Los bordes (amarillo/naranja) presentan menor confianza y son críticos para el cálculo del ángulo de Cobb. | Edges (yellow/orange) show lower confidence and are critical for the Cobb angle calculation. |
+| Menor influencia ◀ Mayor influencia | Lower influence ◀ Higher influence |
+| Baja confianza ◀ Alta confianza | Low confidence ◀ High confidence |
+| Grad-CAM (izquierda): Regiones que influyeron en la decisión del modelo. Zonas cálidas (rojo) = alta influencia. | Grad-CAM (left): Regions that influenced the model's decision. Warm zones (red) = high influence. |
+| Mapa de Confianza (derecha): Certeza del modelo por píxel. Verde = alta confianza | Rojo = baja confianza (el médico debe revisar). | Confidence Map (right): Per-pixel model certainty. Green = high confidence | Red = low confidence (clinician must review). |
+| Este sistema es una herramienta de apoyo. No reemplaza el criterio del especialista. | This system is a support tool. It does not replace the specialist's judgment. |
+
+### Restricciones operativas (no negociables)
 
 - Metodología: **Spec-Driven Work + Work Orchestration** (Leonardo Gonzalez).
 - Cada cambio = 1 commit con convención de `WORKFLOW.md` sección 4.
-- Commits **sin** co-autoría de IA (sólo `Elvis Hernandez`).
+- Commits **sin** co-autoría de IA (solo `Elvis Hernandez`).
 - **NO** force push a `main` ni al Space.
-- **NO** `git push hf` para parchar el Space — usar `python scripts/upload_to_space.py`.
-- **Siempre pasar `--path-in-repo` explícito** para evitar sobrescribir
-  el shim raíz cuando los archivos comparten basename.
-- Tests locales: `pytest tests/ -v` debe seguir verde (60/61).
-- Si surgen ideas tomadas de papers: revisar críticamente qué es aplicable a
-  nuestro dataset (174 imgs, single-rater, sin landmarks de endplate) vs qué
-  requiere recursos que no tenemos. Honestidad ante todo.
+- **NO** `git push hf` para parchar el Space — usar
+  `python scripts/upload_to_space.py`.
+- **Siempre pasar `--path-in-repo`** explícito en uploads.
+- Tests locales: `pytest tests/ -v` debe seguir verde (60/61 actual,
+  esperado 62/63 al cerrar 5.9).
+- Honestidad ante todo: si la generación de la versión EN no queda
+  bien con approach A, probar B sin asumir éxito; si ninguno queda
+  bien, decirlo y planear retrabajo.
 
 ### Contexto adicional
 
@@ -116,8 +140,42 @@ todavía. Candidatos identificados:
 - Username GitHub: **ElvLandau117**
 - Token HF Write: en `~/.cache/huggingface/token`
 - Hardware Space: CPU Basic free (2 vCPU, 16 GB RAM)
-- Branch principal: `main` (sincronizado con `origin/main`)
-- Worktree del Ciclo 5.8: cerrado y merged. Próximo ciclo creará su propio
-  worktree desde main.
+- Pesos en HF Hub: `ElvLandau/spine-checkpoints`
+- Branch principal: `main` @ `b2d293b` (sincronizado con `origin/main`)
+
+### Acción recomendada para arrancar
+
+1. Leer los 5 archivos del onboarding (AGENTS.md, WORKFLOW.md,
+   `docs/CICLO_5_ARTEFACTOS.md` sec 18, `docs/CICLO_4_ARTEFACTOS.md`,
+   `README.md`).
+2. Confirmar que recibiste la imagen ES del mockup (te la adjunto al
+   inicio del chat).
+3. Crear worktree `cycle5_9` con branch
+   `cycle5_9-explainability-reference` desde `main`.
+4. Implementar las 8 sub-tareas listadas arriba en orden.
+5. Deploy + smoke remoto (verificar visualmente que ambas imágenes
+   se ven bien y que el toggle ES/EN las cambia correctamente).
+6. Cerrar: AGENTS.md sec 5 + addendum sec 19 en
+   `docs/CICLO_5_ARTEFACTOS.md` + refresh este
+   `docs/PROMPT_PROXIMO_CHAT.md`.
+7. Merge fast-forward a main + cleanup branch + worktree.
+
+### Candidatos diferidos para Ciclo 6 (después del 5.9)
+
+- Recalibrar threshold de tilt (12° → 14-15°).
+- Fix E: fallback multiclass cuando binary cubre poco.
+- Reentrenamiento con augmentation lumbar agresivo (CLAHE, crop
+  variable, gamma, contrast jitter).
+- Seg-Grad-CAM auténtico (no solo el masking actual).
+- Recalibrar el umbral `is_partial` del Coverage.
+- Flip horizontal/vertical en la UI para radiografías espejadas.
+- i18n Nivel C — traducir también tabs, slider y botones rápidos.
+- Live preview de la SEGMENTACIÓN (no solo de la rotación).
+- Colorbar con valores numéricos (0.25, 0.5, 0.75) en lugar de solo
+  Alta/Baja.
+- Quantización INT8 para tablet.
+- CI con GitHub Actions.
+- Sustentación oral + slides + demo en vivo + smoke test cross-device.
+- Artículo IEEE/ACM si los resultados lo soportan.
 
 ## ↑ HASTA AQUÍ
