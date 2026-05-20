@@ -18,6 +18,7 @@ from spine_segmentation.config import (
 from spine_segmentation.data.transforms import get_inference_transforms, resize_with_padding
 from spine_segmentation.deployment.i18n import (
     DEFAULT_LANG,
+    explain_markdown,
     header_markdown,
     label_to_lang,
     t,
@@ -607,17 +608,11 @@ def create_app(
                         cobb_output = gr.Image(label="Cobb Angle Measurement", height=400)
                     with gr.TabItem("Explainability"):
                         explain_output = gr.Image(label="Grad-CAM (left) | Confidence Map (right)", height=400)
-                        gr.Markdown(
-                            """
-                            **Grad-CAM** (izquierda): Regiones que influyeron en la decision del modelo.
-                            Zonas calidas (rojo) = alta influencia.
-
-                            **Mapa de Confianza** (derecha): Certeza del modelo por pixel.
-                            Verde = alta confianza | Rojo = baja confianza (el medico debe revisar).
-
-                            *Este sistema es una herramienta de apoyo. NO reemplaza el criterio del especialista.*
-                            """
-                        )
+                        # Ciclo 5.8: bilingual + clinically-worded explanation
+                        # of how to read both panels. The component is tracked
+                        # so the language radio can rewrite it live (same trick
+                        # used for the top-of-page header markdown in 5.7).
+                        explain_md = gr.Markdown(explain_markdown(DEFAULT_LANG))
 
                 results_text = gr.Textbox(
                     label="Diagnosis Results",
@@ -696,14 +691,19 @@ def create_app(
             outputs=[binary_output, multi_output, cobb_output, explain_output, results_text],
         )
 
-        # Ciclo 5.7: language toggle updates the header markdown live. The
-        # diagnosis report itself is updated the next time the user presses
-        # Analyze — re-running the model just to retranslate fixed text would
-        # be wasteful (10s for ~200 bytes of string difference).
+        # Ciclo 5.7/5.8: language toggle updates BOTH the page header and the
+        # Explainability-tab markdown live. The diagnosis report and the
+        # explainability panel images are refreshed the next time the user
+        # presses Analyze (re-running the model just to retranslate fixed
+        # text would be wasteful).
+        def _on_language_change(lbl: str):
+            lang = label_to_lang(lbl)
+            return header_markdown(lang), explain_markdown(lang)
+
         language_radio.change(
-            fn=lambda lbl: header_markdown(label_to_lang(lbl)),
+            fn=_on_language_change,
             inputs=[language_radio],
-            outputs=[header_md],
+            outputs=[header_md, explain_md],
         )
 
         gr.Markdown(

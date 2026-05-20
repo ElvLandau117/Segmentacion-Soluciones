@@ -143,6 +143,48 @@ DIAGNOSIS_STRINGS = {
 # ---------------------------------------------------------------------------
 # Markdown blocks for the top-of-page intro
 # ---------------------------------------------------------------------------
+EXPLAIN_MARKDOWN = {
+    "es": """
+**Grad-CAM** (izquierda): regiones DENTRO de la columna detectada que mas
+influyeron en la prediccion del modelo. Zonas calidas (rojo/amarillo) =
+mayor influencia. Fuera de la columna se muestra la radiografia original
+en escala de grises — el modelo no evaluo esas zonas.
+
+**Mapa de Confianza** (derecha): certeza por pixel DENTRO de la columna
+detectada. Verde = alta confianza, rojo = baja confianza (el medico debe
+revisar manualmente esa zona antes de tomar decisiones clinicas).
+
+*Como leerlo:* idealmente, las zonas calientes del Grad-CAM coinciden con
+las vertebras y curvaturas visibles, y la confianza es uniformemente
+verde sobre toda la columna. Si el Grad-CAM se concentra fuera de las
+vertebras, o si hay regiones rojas extensas en la confianza, el resultado
+del Cobb debe interpretarse con cautela.
+
+*Este sistema es una herramienta de apoyo. NO reemplaza el criterio del
+especialista.*
+""",
+    "en": """
+**Grad-CAM** (left): regions INSIDE the detected spine that most
+influenced the model's prediction. Warm tones (red/yellow) = higher
+influence. Outside the spine, the original grayscale radiograph is shown
+— the model did not evaluate those areas.
+
+**Confidence Map** (right): per-pixel certainty INSIDE the detected
+spine. Green = high confidence, red = low confidence (the clinician
+should review those areas manually before making clinical decisions).
+
+*How to read it:* ideally, the Grad-CAM hot zones align with visible
+vertebrae and curvatures, and the confidence is uniformly green over the
+whole spine. If the Grad-CAM concentrates off the vertebrae, or if there
+are extensive red regions in the confidence map, the Cobb result should
+be interpreted with caution.
+
+*This system is a support tool. It does NOT replace the specialist's
+judgment.*
+""",
+}
+
+
 MARKDOWN_HEADER = {
     "es": """
 # Segmentacion Espinal para Diagnostico de Escoliosis
@@ -181,6 +223,11 @@ def t(key: str, lang: str = DEFAULT_LANG) -> str:
 def header_markdown(lang: str = DEFAULT_LANG) -> str:
     """Return the top-of-page markdown intro in the given language."""
     return MARKDOWN_HEADER.get(lang, MARKDOWN_HEADER[DEFAULT_LANG])
+
+
+def explain_markdown(lang: str = DEFAULT_LANG) -> str:
+    """Return the Explainability-tab markdown in the given language."""
+    return EXPLAIN_MARKDOWN.get(lang, EXPLAIN_MARKDOWN[DEFAULT_LANG])
 
 
 def label_to_lang(label: str) -> str:

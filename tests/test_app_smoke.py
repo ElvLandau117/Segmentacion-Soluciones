@@ -472,6 +472,21 @@ def test_header_markdown_has_both_languages():
     assert es != en
 
 
+def test_explain_markdown_has_both_languages():
+    """The Explainability-tab markdown also exists in ES and EN (Ciclo 5.8),
+    and contains the clinical reading guidance ("Como leerlo" / "How to read")."""
+    from spine_segmentation.deployment.i18n import explain_markdown
+    es = explain_markdown("es")
+    en = explain_markdown("en")
+    assert "Grad-CAM" in es
+    assert "Grad-CAM" in en
+    # Spanish has the reading-guide section header.
+    assert "leerlo" in es.lower() or "como" in es.lower()
+    # English has the equivalent.
+    assert "read it" in en.lower() or "how to" in en.lower()
+    assert es != en
+
+
 # ----------------------------------------------------------------------------
 # Live rotation preview — Ciclo 5.6 (fix L)
 # ----------------------------------------------------------------------------
