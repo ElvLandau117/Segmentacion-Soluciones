@@ -258,6 +258,115 @@ def test_binary_overlay_renders_spline_and_inflection_points():
 
 
 # ----------------------------------------------------------------------------
+# Explainability polish — Ciclo 5.8 (fixes O + P + Q + R)
+# ----------------------------------------------------------------------------
+
+def test_annotate_explainability_panel_adds_titles_and_colorbars():
+    """The side-by-side panel must (a) be roughly 2x wider than each input
+    panel (two subpanels), (b) be taller than the input (header strip), and
+    (c) contain readable title pixels (white-ish text on dark header)."""
+    import numpy as np
+    from spine_segmentation.deployment.app import annotate_explainability_panel
+
+    h, w = 200, 200
+    cam = np.full((h, w, 3), 100, dtype=np.uint8)
+    conf = np.full((h, w, 3), 50, dtype=np.uint8)
+
+    out = annotate_explainability_panel(cam, conf, language_label="Español")
+
+    # Two panels side by side; each gains a header strip on top.
+    assert out.shape[0] > h, "panel should be taller (header strip added)"
+    assert out.shape[1] > 2 * w, "panel should be ~2x width plus colorbar margins"
+    # The top 32 px is the dark header. Below 32 we should see the input pixels.
+    assert out[5, 5].tolist() == [30, 30, 30] or out[5, 5].sum() < 100, \
+        "top strip should be dark"
+    # White-ish title text somewhere in the top strip.
+    top_strip = out[:32]
+    bright = (top_strip > 200).all(axis=2)
+    assert bright.sum() > 20, "no bright title pixels found in the header strip"
+
+
+def test_annotate_explainability_panel_localizes_titles():
+    """When language='English' the rendered panel should contain text pixels
+    drawn from English strings (Grad-CAM, Confidence). We don't OCR; we just
+    confirm both ES and EN runs produce title pixels of similar magnitude
+    (i.e. neither path returned an empty / un-titled panel)."""
+    import numpy as np
+    from spine_segmentation.deployment.app import annotate_explainability_panel
+
+    cam = np.full((150, 150, 3), 80, dtype=np.uint8)
+    conf = np.full((150, 150, 3), 80, dtype=np.uint8)
+    es = annotate_explainability_panel(cam, conf, language_label="Español")
+    en = annotate_explainability_panel(cam, conf, language_label="English")
+
+    # Both have a non-trivial number of bright pixels in the header strip.
+    for img in (es, en):
+        top = img[:32]
+        bright = (top > 200).all(axis=2)
+        assert bright.sum() > 20
+
+
+def test_generate_gradcam_applies_prediction_mask():
+    """When a prediction_mask is supplied, pixels outside the mask must be 0
+    in the returned Grad-CAM. This is the regression pin for fix O."""
+    import numpy as np
+    import torch
+    from unittest.mock import patch, MagicMock
+    from spine_segmentation.evaluation.explainability import generate_gradcam
+
+    # Patch GradCAM so we can return a known heatmap without spinning up a model.
+    with patch("spine_segmentation.evaluation.explainability.GradCAM") as cam_cls, \
+         patch("spine_segmentation.evaluation.explainability.get_target_layer") as gtl:
+        instance = MagicMock()
+        instance.return_value = np.ones((1, 8, 8), dtype=np.float32)  # cam at every pixel
+        cam_cls.return_value = instance
+        gtl.return_value = MagicMock()
+
+        # Mask: only the central 4x4 is "spine".
+        mask = np.zeros((8, 8), dtype=np.uint8)
+        mask[2:6, 2:6] = 1
+
+        result = generate_gradcam(
+            model=MagicMock(),
+            input_tensor=torch.zeros((1, 3, 8, 8)),
+            model_name="unet_resnet50",
+            prediction_mask=mask,
+        )
+
+    # Outside the mask: must be 0. Inside: nonzero.
+    assert result.shape == (8, 8)
+    assert result[0, 0] == 0.0
+    assert result[7, 7] == 0.0
+    assert (result[2:6, 2:6] > 0).all()
+
+
+def test_generate_confidence_map_applies_prediction_mask():
+    """Same as above for the confidence map: outside-spine pixels are 0."""
+    import numpy as np
+    import torch
+    from unittest.mock import MagicMock
+    from spine_segmentation.evaluation.explainability import generate_confidence_map
+
+    # Fake model that always returns logits = +5 (high confidence).
+    class FakeModel:
+        def eval(self): pass
+        def __call__(self, x):
+            return torch.full((1, 1, 8, 8), 5.0)
+        def parameters(self):
+            return iter([torch.zeros(1)])
+
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    mask[3:5, 3:5] = 1
+    conf = generate_confidence_map(
+        FakeModel(), torch.zeros((1, 3, 8, 8)), task="binary",
+        prediction_mask=mask,
+    )
+    assert conf.shape == (8, 8)
+    assert conf[0, 0] == 0.0  # outside spine -> zeroed
+    assert conf[3, 3] > 0.9   # inside spine, sigmoid(5) ~= 0.993
+
+
+# ----------------------------------------------------------------------------
 # i18n module + ES/EN toggle — Ciclo 5.7 (fix N)
 # ----------------------------------------------------------------------------
 

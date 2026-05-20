@@ -62,6 +62,82 @@ def rotate_image_for_analysis(image: np.ndarray, deg: float) -> np.ndarray:
     )
 
 
+def _draw_colorbar_strip(
+    image: np.ndarray,
+    x: int, y: int,
+    width: int, height: int,
+    cmap_name: str,
+    lang: str,
+) -> None:
+    """Paint a small vertical colorbar inside `image` at (x, y, width, height).
+
+    Top = high value (color at cmap(1.0)), bottom = low (cmap(0.0)). Labels
+    "Alta/High" and "Baja/Low" anchored at the strip's top and bottom edges.
+    Mutates `image` in place.
+    """
+    import matplotlib.pyplot as plt
+
+    cmap_obj = plt.get_cmap(cmap_name)
+    gradient = np.linspace(1.0, 0.0, height, dtype=np.float32)
+    colors = (cmap_obj(gradient)[:, :3] * 255).astype(np.uint8)  # (height, 3)
+    strip = np.broadcast_to(colors[:, None, :], (height, width, 3))
+    image[y:y + height, x:x + width] = strip
+    # Thin border so the strip is readable against any background.
+    cv2.rectangle(image, (x - 1, y - 1), (x + width, y + height), (200, 200, 200), 1)
+    # Labels — short so they fit in the narrow margin we reserve.
+    label_high = t("explain_colorbar_high", lang)
+    label_low = t("explain_colorbar_low", lang)
+    cv2.putText(image, label_high, (x - 2, y + 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (240, 240, 240), 1, cv2.LINE_AA)
+    cv2.putText(image, label_low, (x - 2, y + height - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (240, 240, 240), 1, cv2.LINE_AA)
+
+
+def annotate_explainability_panel(
+    cam_overlay: np.ndarray,
+    conf_overlay: np.ndarray,
+    language_label: str = "Español",
+) -> np.ndarray:
+    """Compose the side-by-side explainability figure with titles + colorbars.
+
+    Ciclo 5.8 (fix P): the bare side-by-side panel from Ciclo 5 was ambiguous
+    (no titles, no scale). This wraps each subpanel in a header strip with
+    the title and a thin vertical colorbar on the right edge showing the
+    intensity scale. Bilingual via i18n.
+
+    Args:
+        cam_overlay: (H, W, 3) Grad-CAM heatmap blended with the radiograph.
+        conf_overlay: (H, W, 3) confidence map blended with the radiograph.
+        language_label: 'Español' or 'English' (from the UI radio).
+
+    Returns:
+        (H + header, 2*W + 2*colorbar_margin, 3) uint8 panel ready for Gradio.
+    """
+    lang = label_to_lang(language_label)
+    h, w = cam_overlay.shape[:2]
+    header_h = 32           # height of the title strip
+    bar_w = 18              # width of the colorbar
+    margin = 38             # space to the right of each panel for bar + labels
+    panel_w = w + margin
+
+    def build_subpanel(image: np.ndarray, title: str, cmap_name: str) -> np.ndarray:
+        sub = np.zeros((h + header_h, panel_w, 3), dtype=np.uint8)
+        sub[:header_h] = (30, 30, 30)        # dark title strip
+        sub[header_h:, :w] = image
+        cv2.putText(sub, title, (8, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.62, (240, 240, 240), 1, cv2.LINE_AA)
+        _draw_colorbar_strip(
+            sub, x=w + 8, y=header_h + 14,
+            width=bar_w, height=h - 28,
+            cmap_name=cmap_name, lang=lang,
+        )
+        return sub
+
+    left = build_subpanel(cam_overlay, t("explain_title_gradcam", lang), "jet")
+    right = build_subpanel(conf_overlay, t("explain_title_confidence", lang), "RdYlGn")
+    return np.concatenate([left, right], axis=1)
+
+
 def preview_rotation_for_display(original: np.ndarray, deg: float) -> np.ndarray:
     """Rotate the stashed ORIGINAL image for live preview (Ciclo 5.6).
 
@@ -418,19 +494,53 @@ def create_app(
                     aug = transforms(image=img_resized)
                     input_t = aug["image"].unsqueeze(0).to(pipeline.device)
 
-                    # Grad-CAM
-                    gradcam = generate_gradcam(model_for_explain, input_t, model_name_explain)
+                    # Ciclo 5.8: pass the predicted spine mask so Grad-CAM and
+                    # Confidence Map only paint INSIDE the detected column.
+                    # Off-spine pixels stay as the grayscale radiograph, which
+                    # is the natural baseline the clinician already saw.
+                    pred_mask = results.get("binary_mask")
+                    if pred_mask is not None and pred_mask.shape != img_resized.shape[:2]:
+                        # Predict masks are 512x512; img_resized is also 512x512,
+                        # so this is usually a no-op. Defensive only.
+                        pred_mask = cv2.resize(
+                            pred_mask.astype(np.uint8),
+                            (img_resized.shape[1], img_resized.shape[0]),
+                            interpolation=cv2.INTER_NEAREST,
+                        )
+
+                    # Grad-CAM (masked + percentile-clipped inside the helper)
+                    gradcam = generate_gradcam(
+                        model_for_explain, input_t, model_name_explain,
+                        prediction_mask=pred_mask,
+                    )
                     img_float = img_resized.astype(np.float32) / 255.0
                     cam_overlay = show_cam_on_image(img_float, gradcam, use_rgb=True)
 
-                    # Confidence map
+                    # Confidence map (also masked by the predicted spine)
                     task = "binary" if pipeline.binary_model is not None else "multiclass"
-                    confidence = generate_confidence_map(model_for_explain, input_t, task)
+                    confidence = generate_confidence_map(
+                        model_for_explain, input_t, task,
+                        prediction_mask=pred_mask,
+                    )
                     conf_colored = plt.cm.RdYlGn(confidence)[:, :, :3]
                     conf_colored = (conf_colored * 255).astype(np.uint8)
 
-                    # Combine side by side
-                    explainability_img = np.concatenate([cam_overlay, conf_colored], axis=1)
+                    # Blend the confidence colormap with the original radiograph
+                    # outside the spine — without this, the masked-to-zero region
+                    # paints saturated red (the RdYlGn 0-value), which looks like
+                    # "low confidence everywhere" instead of "not evaluated here".
+                    if pred_mask is not None:
+                        outside = (pred_mask == 0)[..., None]
+                        bg = img_resized.astype(np.uint8)
+                        conf_colored = np.where(outside, bg, conf_colored).astype(np.uint8)
+                        # Same trick for the CAM overlay: outside the spine,
+                        # restore the original image so the user keeps anatomical
+                        # context.
+                        cam_overlay = np.where(outside, bg, cam_overlay).astype(np.uint8)
+
+                    explainability_img = annotate_explainability_panel(
+                        cam_overlay, conf_colored, language_label,
+                    )
             except Exception as e:
                 print(f"Explainability error: {e}")
 

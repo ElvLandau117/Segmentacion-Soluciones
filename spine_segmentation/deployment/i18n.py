@@ -75,6 +75,11 @@ DIAGNOSIS_STRINGS = {
         # Misc
         "no_image":      "Por favor cargue una radiografia.",
         "no_model":      "No hay modelo cargado. Por favor proporcione las rutas de los checkpoints.",
+        # Explainability tab (Ciclo 5.8)
+        "explain_title_gradcam":     "Grad-CAM (atencion del modelo)",
+        "explain_title_confidence":  "Confianza (certeza del modelo)",
+        "explain_colorbar_high":     "Alta",
+        "explain_colorbar_low":      "Baja",
     },
     "en": {
         # COBB block
@@ -126,6 +131,11 @@ DIAGNOSIS_STRINGS = {
         # Misc
         "no_image":      "Please upload a radiograph.",
         "no_model":      "No model loaded. Please provide checkpoint paths.",
+        # Explainability tab (Ciclo 5.8)
+        "explain_title_gradcam":     "Grad-CAM (model attention)",
+        "explain_title_confidence":  "Confidence (model certainty)",
+        "explain_colorbar_high":     "High",
+        "explain_colorbar_low":      "Low",
     },
 }
 

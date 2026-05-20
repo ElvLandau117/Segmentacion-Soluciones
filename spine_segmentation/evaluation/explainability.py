@@ -86,18 +86,32 @@ def generate_gradcam(
     input_tensor: torch.Tensor,
     model_name: str,
     target_class: int = None,
+    prediction_mask: np.ndarray = None,
+    percentile_clip: float = 95.0,
 ) -> np.ndarray:
-    """
-    Generate Grad-CAM heatmap showing which regions influenced the prediction.
+    """Generate a Grad-CAM heatmap of which regions influenced the prediction.
+
+    Ciclo 5.8 (fix O + R):
+      - When `prediction_mask` is supplied, the heatmap is multiplied by it
+        before normalization. Outside-spine pixels become 0, so the user only
+        sees activations INSIDE the detected column. Eliminates the off-spine
+        "noise" that confused users in the deployed app.
+      - Percentile clipping (default p95) re-normalizes the heatmap so the
+        hottest regions stand out. Without this, a few outlier pixels can
+        compress the visible range and the heatmap looks washed-out.
 
     Args:
-        model: The segmentation model
-        input_tensor: (1, 3, H, W) normalized input
-        model_name: Name for selecting target layer
-        target_class: Class to explain (None=spine for binary, int for multiclass)
+        model: segmentation model.
+        input_tensor: (1, 3, H, W) normalized input.
+        model_name: architecture name (selects the target layer).
+        target_class: class index to explain. None = spine (binary).
+        prediction_mask: optional (H, W) {0, 1} mask. When supplied, the
+            heatmap is masked to this region.
+        percentile_clip: percentile (0..100) at which to clip the heatmap
+            for contrast enhancement. 95 = saturate the top 5% to 1.0.
 
     Returns:
-        (H, W) heatmap in range [0, 1]
+        (H, W) heatmap in [0, 1].
     """
     target_layer = get_target_layer(model, model_name)
 
@@ -109,7 +123,28 @@ def generate_gradcam(
     cam = GradCAM(model=model, target_layers=[target_layer])
 
     grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
-    return grayscale_cam[0]
+    cam_arr = grayscale_cam[0]
+
+    # Mask by predicted spine region (fix O).
+    if prediction_mask is not None:
+        mask_resized = prediction_mask
+        if mask_resized.shape != cam_arr.shape:
+            mask_resized = cv2.resize(
+                prediction_mask.astype(np.uint8),
+                (cam_arr.shape[1], cam_arr.shape[0]),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        cam_arr = cam_arr * (mask_resized > 0).astype(cam_arr.dtype)
+
+    # Percentile clip to lift the visible range (fix R). Only useful when the
+    # cam has any positive signal — guard against an all-zero array.
+    positives = cam_arr[cam_arr > 0]
+    if positives.size > 0 and 0 < percentile_clip < 100:
+        ceiling = float(np.percentile(positives, percentile_clip))
+        if ceiling > 1e-6:
+            cam_arr = np.clip(cam_arr / ceiling, 0.0, 1.0)
+
+    return cam_arr.astype(np.float32)
 
 
 # ============================================================================
@@ -120,21 +155,28 @@ def generate_confidence_map(
     model,
     input_tensor: torch.Tensor,
     task: str = "binary",
+    prediction_mask: np.ndarray = None,
 ) -> np.ndarray:
-    """
-    Generate a confidence/uncertainty map showing how sure the model is
-    about each pixel's prediction.
+    """Per-pixel confidence map: how sure the model is about each pixel.
 
-    High confidence = model is certain
-    Low confidence = model is uncertain (clinician should review)
+    High confidence (≈1) = model is certain. Low confidence (≈0) = model is
+    uncertain. Clinical use: low-confidence regions inside the predicted
+    spine deserve a human review.
+
+    Ciclo 5.8 (fix O): with `prediction_mask`, the returned map is zero
+    everywhere outside the predicted spine. The Gradio render layer then
+    only paints color INSIDE the spine; the background stays neutral.
+    Without the mask, the background reads as "high confidence" on a
+    saturated colormap, which clutters the figure.
 
     Args:
-        model: The segmentation model
-        input_tensor: (1, 3, H, W) normalized input
-        task: 'binary' or 'multiclass'
+        model: segmentation model.
+        input_tensor: (1, 3, H, W) normalized input.
+        task: 'binary' or 'multiclass'.
+        prediction_mask: optional (H, W) {0, 1} mask of the predicted spine.
 
     Returns:
-        (H, W) confidence map in [0, 1] where 1 = maximum confidence
+        (H, W) confidence in [0, 1].
     """
     model.eval()
     with torch.no_grad():
@@ -142,14 +184,24 @@ def generate_confidence_map(
 
     if task == "binary":
         probs = torch.sigmoid(logits)
-        # Confidence = distance from 0.5 (decision boundary)
+        # Confidence = distance from 0.5 (decision boundary).
         confidence = (2 * torch.abs(probs - 0.5)).cpu().numpy()[0, 0]
     else:
         probs = torch.softmax(logits, dim=1)
-        # Confidence = max probability (how sure about the chosen class)
+        # Confidence = max probability (how sure about the chosen class).
         confidence = probs.max(dim=1)[0].cpu().numpy()[0]
 
-    return confidence
+    if prediction_mask is not None:
+        mask = prediction_mask
+        if mask.shape != confidence.shape:
+            mask = cv2.resize(
+                prediction_mask.astype(np.uint8),
+                (confidence.shape[1], confidence.shape[0]),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        confidence = confidence * (mask > 0).astype(confidence.dtype)
+
+    return confidence.astype(np.float32)
 
 
 # ============================================================================
