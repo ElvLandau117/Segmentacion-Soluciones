@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-19 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-20 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -430,6 +430,50 @@ tabs en ingles.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 17.
 
+### Ciclo 5.8 ✅ COMPLETO — Polish del tab Explainability (Grad-CAM + Confidence)
+Feedback de Elvis tras probar el 5.7: "las zonas que marca [el Grad-CAM]
+no son... o no son claras". El Grad-CAM pintaba activaciones en TODA la
+imagen (incluso fuera de la columna), confundiendo. El confidence map
+saturaba el fondo en rojo (cmap RdYlGn pinta el 0 como rojo intenso) y
+no tenia titulo ni escala visible. Tampoco habia explicacion clinica
+clara de como interpretar cada panel.
+
+- [x] **Fix O — Enmascarar Grad-CAM y Confidence por la mascara binary
+      predicha**. `generate_gradcam` y `generate_confidence_map`
+      ([explainability.py](spine_segmentation/evaluation/explainability.py))
+      ahora aceptan `prediction_mask` opcional; cuando se pasa,
+      multiplican el output por la mascara → activaciones/incertidumbre
+      solo DENTRO de la columna detectada. En `app.py`, el render mezcla
+      las zonas-de-fuera con la imagen original (cv2.where) para que el
+      usuario conserve el contexto anatomico sin el ruido de color.
+- [x] **Fix R — Percentile clip (p95) en Grad-CAM**. Tras el masking,
+      el heatmap se renormaliza al p95 para que los hot-spots reales
+      destaquen. Sin esto, un par de outliers comprimian la escala y
+      el panel se veia "lavado".
+- [x] **Fix P — Anotaciones in-image en el panel side-by-side**. Nueva
+      helper `annotate_explainability_panel(cam, conf, language_label)`
+      en [app.py](spine_segmentation/deployment/app.py): añade strip
+      oscuro de 32px arriba de cada subpanel con titulo
+      ("Grad-CAM (atencion del modelo)" / "(model attention)" y
+      "Confianza (certeza del modelo)" / "(model certainty)") +
+      mini-colorbar vertical de 18px de ancho a la derecha de cada
+      subpanel con etiquetas "Alta/Baja" o "High/Low". Bilingue via
+      i18n. Imagen final: 1100x544 (vs 1024x512 antes).
+- [x] **Fix Q — Markdown clinico bilingue del tab Explainability**.
+      Nuevo `EXPLAIN_MARKDOWN` dict + `explain_markdown(lang)` helper
+      en [i18n.py](spine_segmentation/deployment/i18n.py). Wording
+      clinico mejorado con seccion "Como leerlo" (que es un resultado
+      bueno vs malo). El handler `language_radio.change` ahora
+      actualiza el header markdown Y el explain markdown en una sola
+      llamada.
+- [x] 5 tests nuevos (suite: **60 passed + 1 skipped**, era 55+1).
+- [x] Deploy via `scripts/upload_to_space.py` con `--path-in-repo`
+      explicito.
+- [x] Smoke remoto verde: panel explainability es 1100x544 con titulos
+      visibles, colorbars renderizadas, funciona en ES y EN.
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 18.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -640,3 +684,5 @@ Orden corto:
 | 2026-05-19 (Ciclo 5.6) | `predict()` pierde el parametro `rotation_deg` que tenia en 5.5 | El live preview hace que `input_image` al momento de Analyze ya este rotada visualmente — predict solo necesita delegar al pipeline. Mantener `rotation_deg` ademas seria riesgo de doble-rotacion (si el closure rota nuevamente lo que ya esta rotado). El helper `rotate_image_for_analysis` se queda como funcion pura, usado por `preview_rotation_for_display`. Contrato mas limpio + el regresion-pin `test_predict_callback_no_longer_takes_rotation_deg` evita volver al estado anterior. |
 | 2026-05-19 (Ciclo 5.7) | Quitar el bloque `=== CROSS-CHECK binary vs multiclass ===` del frontend | Elvis cito: "no le aporta al usuario y lo termina confundiendo, ya por detras si el multiclass es con lo que marca o detalla la vertebra no hay problema". Los numeros del multiclass (a veces 90° degenerado por la naturaleza ruidosa del Dice 0.34 multiclass + clamp del arctan) parecian contradecir el binary, confundiendo al usuario. La info de naming (Tn-Lm) y las cajas verdes (que SI son utiles) se calculan internamente con el multiclass pero el usuario no ve sus numeros crudos. Solo cuando el binary FALLA totalmente, mostramos el multi-fallback (alli si es el unico signal). |
 | 2026-05-19 (Ciclo 5.7) | i18n via dict en `i18n.py`, default Español, Nivel B (Diagnosis Results + Header markdown) | Elvis pidio toggle ES/EN para que un evaluador anglofono pueda leer la app sin Google Translate. Default Español porque el target audience es U. Andes / Colombia. Nivel B (no Nivel C/full UI) porque Gradio no permite cambiar labels de componentes facilmente sin recrear el Blocks — los labels de tabs / slider / botones quedan en ingles (mayormente simbolos: Reset, Analyze, ↺ -90°). Patron: `t(key, lang)` con fallbacks a Español y a la key como placeholder visible. El header markdown se re-renderiza en `language_radio.change`; el diagnosis text se re-traduce en el siguiente Analyze (no se re-corre el modelo solo para retraducir strings fijos). |
+| 2026-05-20 (Ciclo 5.8) | Enmascarar Grad-CAM y Confidence Map por la `binary_mask` predicha + percentile clip p95 + mezcla con imagen original fuera del spine | Elvis cito: "las zonas que marca no son claras". El Grad-CAM pintaba toda la imagen (incluso fuera de la columna), confundiendo. Y el cmap RdYlGn aplicado al confidence map sin masking pintaba el fondo en rojo intenso (porque 0=rojo en RdYlGn), simulando "baja confianza en todo el fondo" cuando en realidad esas zonas NO se evaluaron. Solucion en 3 capas: (1) masking en `generate_gradcam`/`generate_confidence_map` con `prediction_mask` opcional → pixels fuera del spine = 0. (2) Percentile clip p95 en el cam → contraste mejorado. (3) Render layer en `app.py` mezcla la imagen original con el cam/conf usando `cv2.where(outside, img, cam)` → el medico ve la radiografia en grises fuera del spine y el color solo donde el modelo realmente analizo. |
+| 2026-05-20 (Ciclo 5.8) | Anotaciones in-image (titulo + colorbar) en el panel side-by-side del Explainability | Sin titulos ni escalas visibles, el usuario tenia que adivinar que panel era cual y que significaban los colores. Nuevo helper `annotate_explainability_panel(cam, conf, language_label)` añade strip oscuro de 32px arriba de cada subpanel con el titulo, y un colorbar vertical de 18px a la derecha con etiquetas "Alta/Baja" o "High/Low". Las strings van por i18n para que el toggle ES/EN los traduzca. El Markdown debajo del panel ("Como leerlo / How to read it") tambien se traduce y explica que es un resultado bueno vs malo clinicamente. |

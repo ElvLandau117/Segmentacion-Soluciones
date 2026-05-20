@@ -12,6 +12,7 @@
 > **Addendum 5.5** (2026-05-19): control manual de rotación en la UI. Ver sección 15.
 > **Addendum 5.6** (2026-05-19): live preview de la rotación. Ver sección 16.
 > **Addendum 5.7** (2026-05-19): limpieza multiclass del frontend + toggle ES/EN. Ver sección 17.
+> **Addendum 5.8** (2026-05-20): polish del tab Explainability. Ver sección 18.
 
 ---
 
@@ -1067,3 +1068,97 @@ Suite final: **55 passed + 1 skipped** (era 47 + 1).
   reporta un Cobb decente, el usuario sí ve un número multiclass — pero
   con el prefijo "fallback" claro y el binary marcado como ERROR, no
   como contradicción.
+
+---
+
+## 18. Addendum 5.8 — Polish del tab Explainability (Grad-CAM + Confidence)
+
+> **Fecha:** 2026-05-20.
+> **Motivación:** Tras el push del 5.7, Elvis probó la pestaña
+> Explainability y reportó: "las zonas que marca no son... o no son
+> claras... la idea es que marque bien las zonas... y adicional el mapa
+> de confianza de una mejor lectura, de más claridad para que el usuario
+> sepa cómo leer la info".
+
+### Diagnóstico
+
+Tres issues distintos en el panel side-by-side:
+
+1. **Grad-CAM pintaba toda la imagen** (incluyendo zonas fuera de la
+   columna detectada). Sin masking, las activaciones del último conv
+   layer del encoder cubrían 512×512 completo, y muchas regiones
+   "calientes" estaban en costillas, pelvis o fondo — no en vértebras.
+2. **Mapa de confianza con cmap RdYlGn sin masking** pintaba el fondo
+   en rojo intenso (porque 0 → rojo en esa cmap). Visualmente parecía
+   "baja confianza en todo el fondo", cuando en realidad esas zonas NO
+   se evaluaron. El médico no podía distinguir "no analizado" de
+   "analizado y con baja confianza".
+3. **Sin títulos ni colorbars** en los subpaneles. Cada uno era una
+   imagen 512×512 plana sin indicación de qué representaba la escala de
+   color. El Markdown debajo explicaba con texto, pero requería leer
+   antes de mirar.
+
+### Cambios
+
+| Fix | Archivo | Detalle |
+|---|---|---|
+| **O** Mask Grad-CAM + Confidence por `binary_mask` | [`explainability.py`](../spine_segmentation/evaluation/explainability.py) + [`app.py`](../spine_segmentation/deployment/app.py) | `generate_gradcam` y `generate_confidence_map` aceptan parámetro opcional `prediction_mask`. Cuando se pasa, multiplican el output por el mask (fuera = 0). El render en app.py mezcla con la imagen original (`cv2.where(outside, original, colored)`) → el fondo es la radiografía en grises, no negro plano. |
+| **R** Percentile clip p95 en Grad-CAM | misma | Tras masking, `np.clip(cam / np.percentile(cam[cam>0], 95), 0, 1)` renormaliza para que los hot-spots reales destaquen. Sin esto, outliers comprimían la escala. |
+| **P** Anotaciones in-image | `app.py` | Nuevo helper `annotate_explainability_panel(cam, conf, language_label)` añade strip oscuro 32px arriba con título + colorbar vertical 18px a la derecha con etiquetas "Alta/Baja" o "High/Low". El panel final pasa de 1024×512 a **1100×544**. |
+| **Q** Markdown bilingüe del tab Explainability | `i18n.py` + `app.py` | Nuevo `EXPLAIN_MARKDOWN` dict + `explain_markdown(lang)`. Wording mejorado con sección "Cómo leerlo / How to read it" que enseña qué es un resultado clínicamente confiable vs sospechoso. El handler `language_radio.change` ahora actualiza header markdown Y explain markdown en un solo round-trip. |
+
+### Tests añadidos (Ciclo 5.8)
+
+1. `test_annotate_explainability_panel_adds_titles_and_colorbars` —
+   output más alto (header strip) + más ancho (colorbar margins) +
+   pixels brillantes en el header (texto).
+2. `test_annotate_explainability_panel_localizes_titles` — Tanto ES
+   como EN producen pixels de título no-triviales.
+3. `test_generate_gradcam_applies_prediction_mask` — Con `prediction_mask`
+   suplido, pixels fuera del mask son 0; dentro son > 0.
+4. `test_generate_confidence_map_applies_prediction_mask` — Mismo
+   comportamiento para el confidence map.
+5. `test_explain_markdown_has_both_languages` — ES y EN existen,
+   difieren, y ambos contienen "Grad-CAM" + guía de lectura.
+
+Suite final: **60 passed + 1 skipped** (era 55 + 1).
+
+### Smoke remoto
+
+Via `gradio_client.Client.predict(handle_file(path), 'Español')` y
+`'English'`:
+
+- Imagen explainability resultado: **1100 × 544** (vs 1024 × 512 antes
+  del 5.8) — matemática: 2 × (512 + 18 colorbar + 20 márgenes) = 1100
+  ancho, 512 + 32 header = 544 alto. ✓
+- Funciona en ambos idiomas — sin crashes ni regresión.
+- Visualmente en el browser: títulos legibles, colorbar visible,
+  Grad-CAM/Confidence masked solo dentro del spine, fondo en grises.
+
+### Commits del Ciclo 5.8
+
+- `037d182` feat(explain): mask gradcam + confidence by predicted spine + annotate panel
+- `62e5e80` feat(i18n,app): bilingual explainability panel description
+- `<este>` docs(cycle5): close cycle 5.8 — explainability polish
+
+### Limitaciones honestas
+
+- **Grad-CAM target layer sigue siendo el último conv del encoder**.
+  Cambiar a Seg-Grad-CAM "auténtico" requeriría agregar
+  `pytorch_grad_cam.GradCAM.compute_cam_per_layer` con upsampling para
+  el caso de segmentación densa — tema mayor, deferred a Ciclo 6 si
+  surge necesidad.
+- **El colorbar es decorativo**: no muestra valores numéricos exactos
+  (solo "Alta/Baja"). Para una versión clínicamente más completa
+  habría que añadir labels intermedios ("0.25", "0.5", "0.75"). Trade-
+  off: con un colorbar de 18px de ancho, no caben más etiquetas
+  legibles.
+- **El Grad-CAM percentile-clip puede oscurecer hot-spots débiles**
+  cuando todo el cam es de baja intensidad (e.g., en una imagen muy
+  poco característica). Si surge un caso real donde no se ve nada,
+  bajar el clip a p99 o quitarlo. No es bloqueante.
+- **El masking depende de `binary_mask`**: si el binary mask falla por
+  completo, el render queda con la imagen original sin overlay
+  (degradación graceful). El multiclass mask no se usa aquí — solo el
+  binary. Coherente con el resto del pipeline (Cobb se calcula desde
+  el binary).
