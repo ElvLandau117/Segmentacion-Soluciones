@@ -1293,3 +1293,43 @@ def test_draw_cobb_visualization_multi_curve_uses_two_colors():
         & (vis[..., 2] > 130)
     )
     assert magenta.sum() > 20, f"expected magenta pixels for secondary, got {magenta.sum()}"
+
+
+# ----------------------------------------------------------------------------
+# Ciclo 5.9 — bilingual static reference image in the Explainability tab
+# ----------------------------------------------------------------------------
+
+def test_explain_reference_images_exist_and_are_nonempty():
+    """Both ES and EN reference PNGs must be committed under
+    spine_segmentation/deployment/assets/ and weigh more than 1 KB
+    (catches accidental empty-file commits)."""
+    import os
+
+    from spine_segmentation.deployment.i18n import explain_reference_path
+
+    for lang in ("es", "en"):
+        path = explain_reference_path(lang)
+        assert os.path.exists(path), f"missing reference image: {path}"
+        size = os.path.getsize(path)
+        assert size > 1024, (
+            f"reference image suspiciously small ({size} bytes): {path}"
+        )
+
+
+def test_explain_reference_path_distinct_per_lang():
+    """ES and EN must resolve to two different PNG files (no silent fallback
+    that would make the language toggle a no-op). Unknown languages must
+    fall back to the default (Spanish) — same path as 'es'."""
+    from spine_segmentation.deployment.i18n import (
+        DEFAULT_LANG,
+        explain_reference_path,
+    )
+
+    es_path = explain_reference_path("es")
+    en_path = explain_reference_path("en")
+    assert es_path != en_path, "ES and EN reference paths must differ"
+    assert es_path.endswith("_es.png")
+    assert en_path.endswith("_en.png")
+    # Unknown lang collapses to default.
+    assert DEFAULT_LANG == "es"
+    assert explain_reference_path("xx") == es_path
