@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-20 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-20 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -474,6 +474,50 @@ clara de como interpretar cada panel.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 18.
 
+### Ciclo 5.9 ✅ COMPLETO — Imagen fija de referencia clinica en Explainability
+Mockup educativo aportado por el medico companero (5 callouts numerados +
+colorbars + disclaimer) para dejar fijo arriba del panel dinamico de
+Explainability. Da al medico una leyenda visual de como interpretar
+Grad-CAM y Confidence Map ANTES de ver su propio caso, reduciendo la
+curva de lectura del 5.8.
+
+- [x] **Generador one-shot** [`scripts/generate_explain_reference.py`](scripts/generate_explain_reference.py):
+      compone el panel side-by-side desde un radiograph sample (S_22) +
+      mascara binary del dataset, simula Grad-CAM (jet) y Confidence
+      (RdYlGn) sobre la silueta de la columna, dibuja 5 callouts
+      numerados con flechas leader + dos colorbars centradas + caption +
+      disclaimer footer. Toma `--lang es|en|both`. No corre en runtime —
+      solo para regenerar los assets.
+- [x] **Assets bilingues** committeados:
+      `spine_segmentation/deployment/assets/explainability_reference_es.png`
+      y `_en.png` (~165 KB cada uno, 1126×716).
+- [x] **`explain_reference_path(lang)`** nuevo en
+      [`i18n.py`](spine_segmentation/deployment/i18n.py): retorna el path
+      absoluto al PNG correcto. Fallback a Español si el lang es
+      desconocido.
+- [x] **UI** [`app.py`](spine_segmentation/deployment/app.py): nuevo
+      `gr.Image(interactive=False, height=300)` ARRIBA del
+      `explain_output` dinamico del 5.8. `language_radio.change` actualiza
+      en vivo header_md + explain_md + reference_image en una sola
+      llamada (extension natural del handler del 5.7/5.8).
+- [x] 2 tests nuevos (suite: **62 passed + 1 skipped**, era 60+1).
+- [x] Deploy via `scripts/upload_to_space.py` con `--path-in-repo`
+      explicito para los 4 archivos (2 PNGs + i18n.py + app.py).
+- [x] Smoke remoto verde: Space en RUNNING con la imagen ES visible al
+      cargar y la EN visible al togglear el radio (verificado via
+      gradio_client + HEAD HTTP 200).
+
+**Decision honesta**: como la imagen PNG original del medico companero
+no estaba disponible como path de archivo (solo como adjunto visual al
+chat), los dos PNGs son **recreacion programatica del mockup**, no
+copia binaria. Garantiza consistencia ES↔EN al 100%, pero puede no
+coincidir pixel a pixel con el diseño original. Si Elvis quiere usar el
+PNG exacto del medico, basta dejar el archivo en `assets/...es.png` y
+re-correr `python scripts/generate_explain_reference.py --lang en` para
+regenerar solo el EN con la misma plantilla.
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 19.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -686,3 +730,5 @@ Orden corto:
 | 2026-05-19 (Ciclo 5.7) | i18n via dict en `i18n.py`, default Español, Nivel B (Diagnosis Results + Header markdown) | Elvis pidio toggle ES/EN para que un evaluador anglofono pueda leer la app sin Google Translate. Default Español porque el target audience es U. Andes / Colombia. Nivel B (no Nivel C/full UI) porque Gradio no permite cambiar labels de componentes facilmente sin recrear el Blocks — los labels de tabs / slider / botones quedan en ingles (mayormente simbolos: Reset, Analyze, ↺ -90°). Patron: `t(key, lang)` con fallbacks a Español y a la key como placeholder visible. El header markdown se re-renderiza en `language_radio.change`; el diagnosis text se re-traduce en el siguiente Analyze (no se re-corre el modelo solo para retraducir strings fijos). |
 | 2026-05-20 (Ciclo 5.8) | Enmascarar Grad-CAM y Confidence Map por la `binary_mask` predicha + percentile clip p95 + mezcla con imagen original fuera del spine | Elvis cito: "las zonas que marca no son claras". El Grad-CAM pintaba toda la imagen (incluso fuera de la columna), confundiendo. Y el cmap RdYlGn aplicado al confidence map sin masking pintaba el fondo en rojo intenso (porque 0=rojo en RdYlGn), simulando "baja confianza en todo el fondo" cuando en realidad esas zonas NO se evaluaron. Solucion en 3 capas: (1) masking en `generate_gradcam`/`generate_confidence_map` con `prediction_mask` opcional → pixels fuera del spine = 0. (2) Percentile clip p95 en el cam → contraste mejorado. (3) Render layer en `app.py` mezcla la imagen original con el cam/conf usando `cv2.where(outside, img, cam)` → el medico ve la radiografia en grises fuera del spine y el color solo donde el modelo realmente analizo. |
 | 2026-05-20 (Ciclo 5.8) | Anotaciones in-image (titulo + colorbar) en el panel side-by-side del Explainability | Sin titulos ni escalas visibles, el usuario tenia que adivinar que panel era cual y que significaban los colores. Nuevo helper `annotate_explainability_panel(cam, conf, language_label)` añade strip oscuro de 32px arriba de cada subpanel con el titulo, y un colorbar vertical de 18px a la derecha con etiquetas "Alta/Baja" o "High/Low". Las strings van por i18n para que el toggle ES/EN los traduzca. El Markdown debajo del panel ("Como leerlo / How to read it") tambien se traduce y explica que es un resultado bueno vs malo clinicamente. |
+| 2026-05-20 (Ciclo 5.9) | Imagen fija de referencia clinica ARRIBA del panel dinamico de Explainability, bilingue ES/EN | Mockup educativo del medico companero con 5 callouts numerados (hot-spots, trayectoria esperada, activacion fuera de spine, alta confianza, bordes de menor certeza) + colorbars + disclaimer. Sirve como leyenda fija para que el medico aprenda a leer el panel dinamico del 5.8 ANTES de ver su caso. Wire en gr.Image(interactive=False, height=300) arriba del explain_output. El handler language_radio.change ahora actualiza header_md + explain_md + reference_image en un solo round-trip (extension natural del 5.7/5.8). |
+| 2026-05-20 (Ciclo 5.9) | Recreacion programatica del mockup con scripts/generate_explain_reference.py en lugar de copiar el PNG original | El PNG original del medico companero no estaba disponible como path de archivo (solo como adjunto visual al chat). Recrear el panel con matplotlib + cv2 (sample radiograph S_22 + binary mask + simulated jet/RdYlGn overlays + callouts + colorbars) garantiza consistencia ES↔EN al 100%. Trade-off: la version recreada puede no coincidir pixel a pixel con el diseño original. Mitigacion: el script se commitea con `--lang es|en|both` para regenerar al cambiar strings o reemplazar la base. Si Elvis quiere el PNG exacto del medico, basta colocarlo manualmente en assets/ y re-correr el script solo para la traduccion EN. |

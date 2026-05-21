@@ -13,6 +13,7 @@
 > **Addendum 5.6** (2026-05-19): live preview de la rotación. Ver sección 16.
 > **Addendum 5.7** (2026-05-19): limpieza multiclass del frontend + toggle ES/EN. Ver sección 17.
 > **Addendum 5.8** (2026-05-20): polish del tab Explainability. Ver sección 18.
+> **Addendum 5.9** (2026-05-20): imagen fija de referencia clínica bilingüe en Explainability. Ver sección 19.
 
 ---
 
@@ -1162,3 +1163,125 @@ Via `gradio_client.Client.predict(handle_file(path), 'Español')` y
   (degradación graceful). El multiclass mask no se usa aquí — solo el
   binary. Coherente con el resto del pipeline (Cobb se calcula desde
   el binary).
+
+---
+
+## 19. Addendum 5.9 — Imagen fija de referencia clínica en Explainability
+
+> **Fecha:** 2026-05-20.
+> **Motivación:** Tras el polish del 5.8 (masking + colorbars +
+> markdown bilingüe), el médico colaborador de Elvis preparó un
+> **mockup educativo** del panel Explainability con 5 anotaciones
+> numeradas + colorbars con interpretación + disclaimer. Elvis quería
+> dejarlo **fijo encima del panel dinámico** del Space, en ambos
+> idiomas — para que cualquier médico que abra la app aprenda a leer
+> Grad-CAM + Confidence ANTES de ver su propio caso. Es una mejora
+> puramente pedagógica, no algorítmica.
+
+### Diagnóstico
+
+El panel dinámico del 5.8 ya es claro para alguien con contexto, pero
+el primer usuario que abre la app sin haberlo visto antes:
+
+1. No sabe que **rojo en Grad-CAM = alta influencia** (no necesariamente
+   un hallazgo clínico).
+2. Confunde **rojo en Confidence = baja confianza** con "alarma" (es
+   indicación de revisar, no de patología).
+3. No tiene referencia visual para distinguir "hot-spot legítimo en
+   la columna" de "activación espuria fuera de la columna".
+
+El markdown del 5.8 explica esto con texto, pero un médico apurado
+salta lectura. Una imagen anotada con flechas es más eficiente
+clínicamente.
+
+### Cambios
+
+| Fix | Archivo | Detalle |
+|---|---|---|
+| **S** Generador one-shot bilingüe | nuevo [`scripts/generate_explain_reference.py`](../scripts/generate_explain_reference.py) | Compone un panel side-by-side estilo mockup: sample radiograph (S_22) + binary mask del dataset → simulación de Grad-CAM (jet) y Confidence (RdYlGn) sobre la silueta del spine. Dibuja 5 callouts numerados con flechas leader + 2 colorbars centradas + caption + disclaimer footer. Acepta `--lang es|en|both`. No se invoca en runtime — solo para regenerar los assets. |
+| **T** Assets bilingües committeados | nueva carpeta `spine_segmentation/deployment/assets/` | Dos PNGs (~165 KB cada uno, 1126×716): `explainability_reference_es.png` y `_en.png`. Subidos al Space via LFS automático del `HfApi`. |
+| **U** Helper i18n | [`i18n.py`](../spine_segmentation/deployment/i18n.py) | Nuevo `EXPLAIN_REFERENCE_FILES` dict + `explain_reference_path(lang)` retorna path absoluto. Fallback a Español para lang desconocido. |
+| **V** UI wiring | [`app.py`](../spine_segmentation/deployment/app.py) | Nuevo `reference_image = gr.Image(interactive=False, height=300)` ARRIBA del `explain_output` dinámico. Extender `_on_language_change` para que `language_radio.change` actualice también la `reference_image` en un solo round-trip (junto al header_md y explain_md del 5.7/5.8). |
+
+### Restricciones técnicas resueltas durante el ciclo
+
+- **`show_download_button` removido en Gradio 6.0**: el local dev corre
+  Gradio 6.0 (donde el kwarg ya no existe), aunque el Space corre 5.50
+  (donde sí existe). Para mantener `pytest tests/` verde en ambos
+  entornos, se omite el kwarg y se acepta el default `True` — una
+  imagen estática educativa es seguro que el usuario descargue.
+
+### Tests añadidos (Ciclo 5.9)
+
+1. `test_explain_reference_images_exist_and_are_nonempty` — ambos PNGs
+   resuelven a un path existente con tamaño > 1 KB. Catch
+   regression-pin contra commits accidentales de archivos vacíos o
+   typos en el mapping del i18n.
+2. `test_explain_reference_path_distinct_per_lang` — ES y EN devuelven
+   paths distintos (sin esto, el toggle ES/EN sería un no-op
+   silencioso) + unknown lang colapsa al default (ES).
+
+Suite final: **62 passed + 1 skipped** (era 60 + 1).
+
+### Smoke remoto
+
+Tras el push al Space, verificación via `gradio_client` + HEAD HTTP:
+
+| Test | Resultado |
+|---|---|
+| `runtime.stage` post-rebuild | `RUNNING` ✓ |
+| HEAD `/spaces/ElvLandau/spine-segmentation` | HTTP 200 estable ✓ |
+| Reference image visible al cargar el Space (default ES) | ✓ |
+| Toggle a English en el radio → reference image cambia a `_en.png` | ✓ |
+| Reference image arriba del panel dinámico (orden correcto) | ✓ |
+| Sin regresión: predict() sigue devolviendo 4 overlays + texto | ✓ |
+
+### Commits del Ciclo 5.9
+
+- `71a5494` feat(assets): generate bilingual explainability reference images
+- `a44c50f` feat(i18n,app): wire static reference image into Explainability tab with language toggle
+- `5510a79` test(app): cover bilingual explainability reference assets
+- `<este>` docs(cycle5): close cycle 5.9 — bilingual explainability reference image
+
+### Decisión honesta documentada
+
+La imagen original del médico colaborador no estaba disponible como
+path de archivo en el sistema en el momento de generación — solo como
+adjunto visual al chat. Los dos PNGs son **recreación programática del
+mockup** con matplotlib + cv2, no copia binaria. Esto:
+
+- ✅ Garantiza consistencia visual ES↔EN al 100% (mismo template).
+- ✅ Es reproducible y versionable (el generador queda commiteado).
+- ⚠️ Puede no coincidir píxel a píxel con el diseño original del médico.
+
+Mitigación documentada en AGENTS.md sec 9: si Elvis quiere usar el PNG
+exacto del médico, basta dejarlo en `assets/explainability_reference_es.png`
+y re-correr `python scripts/generate_explain_reference.py --lang en`
+para regenerar solo el EN con la misma plantilla.
+
+### Limitaciones honestas
+
+- **El sample radiograph es S_22**, que es un caso real de S-shape del
+  dataset MaIA — visualmente representativo pero específico. Si en el
+  futuro la app se especializa a una población distinta (e.g.,
+  pediátricos con curvas distintas), el sample podría regenerarse con
+  otro caso del dataset.
+- **Las activaciones del Grad-CAM y los valores de confidence son
+  simulados** (no salen del modelo real). El propósito es educativo —
+  enseñar qué SIGNIFICAN los colores, no qué saldría en este caso
+  exacto. Para una versión "anatómicamente exacta" habría que correr
+  inferencia real del modelo deployment y congelar el resultado, lo
+  cual añade complejidad sin upside pedagógico (el médico ya ve el
+  resultado real del modelo en el panel dinámico debajo).
+- **El generador depende del dataset MaIA local** (`Scoliosis/S_22.jpg`
+  + `LabelBinaryJPG/Label_S_22.jpg`), que no está en git. Para
+  regenerar en otra máquina sin el dataset, hay que ajustar los args
+  `--sample-xray` y `--sample-mask` a otras rutas.
+- **Anotaciones numéricas sobre los hot-spots del CAM real** (e.g.,
+  "esta zona dispara X% de activación") quedan pendientes para el
+  Ciclo 6 si Elvis lo prioriza tras probar — el plan original lo
+  excluyó explícitamente como over-scope del 5.9.
+- **El layout es fijo 1126×716**: si Elvis cambia el `height=300` de
+  Gradio, la imagen se downscale-eará proporcionalmente; las
+  proporciones del texto interno seguirán legibles porque las anotaciones
+  son `fontsize 6-10pt` (representan ~12-20px en el render final).
