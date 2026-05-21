@@ -102,6 +102,80 @@ CALLOUT_COLOR = {
     "orange": "#E67E22",
 }
 
+# ---------------------------------------------------------------------------
+# Figure layout constants (Ciclo 5.11): keeping them at module level so the
+# pixel-to-figure converter and _build_figure agree on the rectangles.
+# Each tuple is (left, bottom, width, height) in figure fraction.
+# ---------------------------------------------------------------------------
+AX_CAM_RECT = (0.21, 0.30, 0.26, 0.58)
+AX_CONF_RECT = (0.53, 0.30, 0.26, 0.58)
+
+
+def _derive_visual_anchors(spine_mask: np.ndarray) -> dict:
+    """Compute the visual anchors used by the figure: spine bbox, centroid,
+    and 4 off-anatomy blob positions (above head, lateral left, pelvis,
+    lateral right) — all relative to the spine bbox so they stay 'outside
+    the spine' for any sample.
+
+    Returns a dict of pixel coords (px, py) in the 512x512 image space:
+
+        {
+            "centroid":    (cx, cy),
+            "bbox":        (xmin, ymin, xmax, ymax),
+            "blob_top":    (cx, ymin - margin)          # above the spine
+            "blob_pelvis": (cx, ymax + margin)          # below the spine
+            "blob_left":   (xmin - margin, mid_y)       # left flank
+            "blob_right":  (xmax + margin, lower_y)     # right flank
+        }
+
+    Used by ``_simulate_gradcam`` to place spurious off-spine activations
+    AND by ``_build_figure`` to compute callout arrow targets in figure
+    fraction. Both consumers stay in sync this way: every arrow always
+    lands on either the spine (centroid / bbox edge) or a visible blob.
+    """
+    ys, xs = np.where(spine_mask > 0)
+    if len(xs) == 0:
+        # Empty mask -> fall back to image-center anchors so the script
+        # still produces a non-crashing reference image.
+        return {
+            "centroid": (256, 256),
+            "bbox": (200, 100, 312, 412),
+            "blob_top": (256, 40),
+            "blob_pelvis": (256, 470),
+            "blob_left": (160, 280),
+            "blob_right": (360, 320),
+        }
+    xmin, xmax = int(xs.min()), int(xs.max())
+    ymin, ymax = int(ys.min()), int(ys.max())
+    cx, cy = int(xs.mean()), int(ys.mean())
+    h = max(ymax - ymin, 1)
+    return {
+        "centroid":    (cx, cy),
+        "bbox":        (xmin, ymin, xmax, ymax),
+        "blob_top":    (cx,                       max(20,  ymin - 25)),
+        "blob_pelvis": (cx,                       min(490, ymax + 50)),
+        "blob_left":   (max(50,  xmin - 70),      ymin + h // 2),
+        "blob_right":  (min(490, xmax + 70),      ymin + (2 * h) // 3),
+    }
+
+
+def _pixel_to_figure_coords(
+    px: int, py: int,
+    ax_rect: tuple[float, float, float, float],
+    img_size: int = 512,
+) -> tuple[float, float]:
+    """Convert pixel (px, py) inside a ``size x size`` ``imshow`` to figure
+    fraction (fx, fy) using the axes rect ``(left, bottom, width, height)``.
+
+    Note: matplotlib figure y-axis is flipped vs image y-axis — image pixel
+    (0, 0) sits at the TOP of the axes rect, which is ``bottom + height`` in
+    figure coords.
+    """
+    left, bottom, width, height = ax_rect
+    fx = left + (px / img_size) * width
+    fy = bottom + ((img_size - py) / img_size) * height
+    return (fx, fy)
+
 
 def _load_and_resize_grayscale(path: Path, size: int = 512) -> np.ndarray:
     """Read a grayscale X-ray, letterbox-resize to (size, size)."""
@@ -135,9 +209,11 @@ def _load_and_resize_mask(path: Path, size: int = 512) -> np.ndarray:
     return (canvas > 127).astype(np.uint8)
 
 
-def _simulate_gradcam(spine_mask: np.ndarray, size: int = 512) -> np.ndarray:
-    """Synthesize a Grad-CAM-like heatmap concentrated on the spine, with a
-    few illustrative spurious hot-spots (off-spine) so callout #3 makes sense.
+def _simulate_gradcam(spine_mask: np.ndarray, anchors: dict, size: int = 512) -> np.ndarray:
+    """Synthesize a Grad-CAM-like heatmap concentrated on the spine, with
+    illustrative spurious hot-spots (off-spine) at positions derived from
+    ``anchors`` (Ciclo 5.11 refactor) so callout #3 always has something
+    visible to point at, regardless of which sample radiograph is used.
 
     Returns a float32 (size, size) array in [0, 1].
     """
@@ -148,17 +224,21 @@ def _simulate_gradcam(spine_mask: np.ndarray, size: int = 512) -> np.ndarray:
     heat = cv2.dilate(heat, kernel, iterations=2)
     heat = cv2.GaussianBlur(heat, (31, 31), 0)
 
-    # A couple of intentional "spurious" hot-spots so the off-anatomy callout
-    # has something to point to. Coordinates chosen by eye for the S_22 layout.
     def gaussian_blob(canvas: np.ndarray, cx: int, cy: int, sigma: float, peak: float):
         ys, xs = np.ogrid[:canvas.shape[0], :canvas.shape[1]]
         g = peak * np.exp(-((xs - cx) ** 2 + (ys - cy) ** 2) / (2 * sigma ** 2))
         np.maximum(canvas, g, out=canvas)
 
-    gaussian_blob(heat, cx=240, cy=70,  sigma=22, peak=0.95)   # top-of-head (above spine)
-    gaussian_blob(heat, cx=120, cy=350, sigma=28, peak=0.55)   # left flank artifact
-    gaussian_blob(heat, cx=235, cy=470, sigma=30, peak=0.85)   # pelvis hotspot
-    gaussian_blob(heat, cx=420, cy=420, sigma=20, peak=0.45)   # right side artifact
+    # Off-anatomy hot-spots: each placed at an anchor derived from the spine
+    # bbox so they sit OUTSIDE the spine even when the sample changes.
+    bt_x, bt_y = anchors["blob_top"]
+    bp_x, bp_y = anchors["blob_pelvis"]
+    bl_x, bl_y = anchors["blob_left"]
+    br_x, br_y = anchors["blob_right"]
+    gaussian_blob(heat, cx=bt_x, cy=bt_y, sigma=22, peak=0.95)   # top-of-head (above spine)
+    gaussian_blob(heat, cx=bl_x, cy=bl_y, sigma=28, peak=0.55)   # left flank artifact
+    gaussian_blob(heat, cx=bp_x, cy=bp_y, sigma=30, peak=0.85)   # pelvis hotspot (callout #3)
+    gaussian_blob(heat, cx=br_x, cy=br_y, sigma=20, peak=0.45)   # right side artifact
 
     # Normalize and percentile-clip (matches the live pipeline behavior from
     # Ciclo 5.8 fix R).
@@ -293,9 +373,20 @@ def _draw_horizontal_colorbar(ax, cmap_name: str, low_label: str, high_label: st
             transform=ax.transAxes, fontsize=7.8, color="#333333")
 
 
-def _build_figure(cam_img: np.ndarray, conf_img: np.ndarray, strings: dict) -> plt.Figure:
+def _build_figure(
+    cam_img: np.ndarray,
+    conf_img: np.ndarray,
+    strings: dict,
+    anchors: dict,
+) -> plt.Figure:
     """Compose the full reference panel: title strip, 2 X-ray panels with
-    callouts + arrows, 2 horizontal colorbars, captions, and disclaimer."""
+    callouts + arrows, 2 horizontal colorbars, captions, and disclaimer.
+
+    Ciclo 5.11: ``anchors`` (output of ``_derive_visual_anchors``) is used
+    to compute the 5 arrow targets in figure fraction so they always land
+    on the spine or on a visible off-anatomy blob — invariant to the
+    specific sample radiograph used as backdrop.
+    """
     fig = plt.figure(figsize=(11.26, 7.16), dpi=100, facecolor="white")
 
     # ---- Title strip (mimics the app's tab label, for visual continuity)
@@ -311,7 +402,7 @@ def _build_figure(cam_img: np.ndarray, conf_img: np.ndarray, strings: dict) -> p
     # ---- Left panel (Grad-CAM)
     # Width 0.26 — narrower than 0.30 so the left-side callouts (x=0.025 +
     # box_w 0.165 ending at 0.19) clear the panel's left edge with ~2% margin.
-    ax_cam = fig.add_axes([0.21, 0.30, 0.26, 0.58])
+    ax_cam = fig.add_axes(list(AX_CAM_RECT))
     ax_cam.imshow(cam_img)
     ax_cam.set_xticks([]); ax_cam.set_yticks([])
     for spine in ax_cam.spines.values():
@@ -320,7 +411,7 @@ def _build_figure(cam_img: np.ndarray, conf_img: np.ndarray, strings: dict) -> p
     # ---- Right panel (Confidence)
     # Width 0.26 ending at x=0.79 — so the right-side callouts (x=0.81 +
     # box_w 0.165 ending at 0.975) clear the panel's right edge with margin.
-    ax_conf = fig.add_axes([0.53, 0.30, 0.26, 0.58])
+    ax_conf = fig.add_axes(list(AX_CONF_RECT))
     ax_conf.set_facecolor("#1F6B3A")  # dark green backdrop visible behind the spine
     ax_conf.imshow(conf_img)
     ax_conf.set_xticks([]); ax_conf.set_yticks([])
@@ -337,23 +428,39 @@ def _build_figure(cam_img: np.ndarray, conf_img: np.ndarray, strings: dict) -> p
     overlay.set_xlim(0, 1); overlay.set_ylim(0, 1)
     overlay.patch.set_alpha(0)
 
+    # Derive arrow targets from anchors (Ciclo 5.11). Each maps a pixel
+    # anchor inside the 512x512 imshow to a figure-fraction coordinate
+    # via _pixel_to_figure_coords + the relevant ax rect.
+    cx, cy = anchors["centroid"]
+    xmin, _ymin, xmax, _ymax = anchors["bbox"]
+    bt = anchors["blob_top"]
+    bp = anchors["blob_pelvis"]
+
+    arrow_top_cam        = _pixel_to_figure_coords(*bt,                 AX_CAM_RECT)
+    arrow_center_cam     = _pixel_to_figure_coords(cx, cy,              AX_CAM_RECT)
+    arrow_pelvis_cam     = _pixel_to_figure_coords(*bp,                 AX_CAM_RECT)
+    arrow_center_conf    = _pixel_to_figure_coords(cx, cy,              AX_CONF_RECT)
+    # Callout #5 anchor: lateral edge of the spine, slightly below midline
+    # so the arrow lands clearly in the yellow/orange border zone.
+    edge_x = xmax
+    edge_y = cy + max(20, (anchors["bbox"][3] - anchors["bbox"][1]) // 4)
+    arrow_edge_conf      = _pixel_to_figure_coords(edge_x, edge_y,      AX_CONF_RECT)
+
     # callouts on the LEFT side of the cam panel (1, 2, 3)
-    # arrow_xy targets land inside the (now narrower) cam panel at x in
-    # [0.21, 0.47]; tuned by eye against S_22 simulated overlays.
     _draw_callout(overlay, *c1, box_xy=(0.025, 0.70),
-                  arrow_xy=(0.30, 0.83))     # red hotspot top-of-head
+                  arrow_xy=arrow_top_cam)         # red hotspot top-of-head
     _draw_callout(overlay, *c2, box_xy=(0.025, 0.46),
-                  arrow_xy=(0.32, 0.55))     # spine center
+                  arrow_xy=arrow_center_cam)      # spine center
     _draw_callout(overlay, *c3, box_xy=(0.025, 0.22),
-                  arrow_xy=(0.31, 0.36))     # bottom spurious hotspot
+                  arrow_xy=arrow_pelvis_cam)      # pelvis spurious hotspot
 
     # callouts on the RIGHT side of the confidence panel (4, 5).
     # Right panel now ends at x=0.79; callouts start at 0.81 so the body text
     # never bleeds back into the visualization.
     _draw_callout(overlay, *c4, box_xy=(0.810, 0.62),
-                  arrow_xy=(0.69, 0.65))     # green center of spine confidence
+                  arrow_xy=arrow_center_conf)     # green center of spine confidence
     _draw_callout(overlay, *c5, box_xy=(0.810, 0.32),
-                  arrow_xy=(0.69, 0.40))     # edge of spine confidence
+                  arrow_xy=arrow_edge_conf)       # edge of spine confidence
 
     # ---- Horizontal colorbars under each panel. Widths matched to panels.
     ax_cbar_left = fig.add_axes([0.22, 0.235, 0.23, 0.022])
@@ -388,16 +495,24 @@ def _build_figure(cam_img: np.ndarray, conf_img: np.ndarray, strings: dict) -> p
 
 
 def generate(lang: str, out_path: Path, sample_xray: Path, sample_mask: Path) -> None:
-    """Generate one reference PNG for the given language and save it."""
+    """Generate one reference PNG for the given language and save it.
+
+    Ciclo 5.11: anchors are derived from the spine mask once and threaded
+    through both ``_simulate_gradcam`` (for blob placement) and
+    ``_build_figure`` (for arrow targets). This keeps the callout arrows
+    landing on visible content regardless of which sample radiograph is
+    used as the backdrop.
+    """
     gray = _load_and_resize_grayscale(sample_xray, size=512)
     mask = _load_and_resize_mask(sample_mask, size=512)
-    cam = _simulate_gradcam(mask)
+    anchors = _derive_visual_anchors(mask)
+    cam = _simulate_gradcam(mask, anchors)
     conf = _simulate_confidence(mask)
     cam_img = _blend_jet(gray, cam)
     conf_img = _blend_rdylgn(gray, conf, mask)
 
     strings = STRINGS[lang]
-    fig = _build_figure(cam_img, conf_img, strings)
+    fig = _build_figure(cam_img, conf_img, strings, anchors)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=100, bbox_inches=None, facecolor="white")
     plt.close(fig)
