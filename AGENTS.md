@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-20 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-20 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -518,6 +518,43 @@ regenerar solo el EN con la misma plantilla.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 19.
 
+### Ciclo 5.10 ✅ COMPLETO — Fix de lateralidad clinica + sample mas severo
+Feedback de la compañera medica (especialista) tras probar el Space del
+Ciclo 5.9: dos puntos. (1) la app reporta la convexidad en perspectiva
+del viewer en vez de en anatomia del paciente — caso S_158 de la MaIA
+(anatomicamente right-convex) reportado como "convexidad izquierda".
+(2) la radiografia base del reference image (S_22, Cobb 24.9°) no se
+reconoce como un caso real del dataset porque es demasiado modesta;
+elegir un caso mas demostrativo (S_200) sube el valor pedagogico.
+
+- [x] **Fix W — Convencion clinica de lateralidad**
+      ([cobb_angle.py:_curve_direction](spine_segmentation/evaluation/cobb_angle.py)).
+      Swap del ternario en linea 73 (right ↔ left) + docstring
+      reescrita documentando explicitamente la convencion radiologica
+      del espejo (paciente derecho = viewer izquierdo). El cambio es
+      contained: i18n / app / visualize no necesitan tocarse, los
+      strings "derecha" / "izquierda" siguen funcionando — solo cambia
+      su SIGNIFICADO (ahora anatomia del paciente, antes perspectiva
+      del viewer).
+- [x] **Test de regresion** `test_curve_direction_uses_patient_anatomy
+      _convention` que pinea el mapping post-fix (negative slope → "left",
+      positive slope → "right") + documenta el flip vs el comportamiento
+      pre-Ciclo 5.10. Asegura que un refactor futuro no re-invierta la
+      convencion silenciosamente.
+- [x] **Sample base S_22 → S_200**
+      ([scripts/generate_explain_reference.py](scripts/generate_explain_reference.py)).
+      S_200 muestra una S-curve clinicamente clara; el rendering
+      educativo gana fidelidad pedagogica. Defaults del script bumped a
+      S_200; las 2 PNGs en `assets/` regeneradas (~187 KB c/u).
+- [x] 1 test nuevo (suite: **63 passed + 1 skipped**, era 62+1).
+- [x] Deploy via `scripts/upload_to_space.py` con `--path-in-repo`
+      explicito (3 archivos: cobb_angle.py + 2 PNGs).
+- [x] Smoke remoto verde: predict(S_158) ahora reporta "convexidad
+      derecha" para la curva principal (era "izquierda"). El reference
+      image en el tab Explainability ya muestra la base S_200.
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 20.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -732,3 +769,5 @@ Orden corto:
 | 2026-05-20 (Ciclo 5.8) | Anotaciones in-image (titulo + colorbar) en el panel side-by-side del Explainability | Sin titulos ni escalas visibles, el usuario tenia que adivinar que panel era cual y que significaban los colores. Nuevo helper `annotate_explainability_panel(cam, conf, language_label)` añade strip oscuro de 32px arriba de cada subpanel con el titulo, y un colorbar vertical de 18px a la derecha con etiquetas "Alta/Baja" o "High/Low". Las strings van por i18n para que el toggle ES/EN los traduzca. El Markdown debajo del panel ("Como leerlo / How to read it") tambien se traduce y explica que es un resultado bueno vs malo clinicamente. |
 | 2026-05-20 (Ciclo 5.9) | Imagen fija de referencia clinica ARRIBA del panel dinamico de Explainability, bilingue ES/EN | Mockup educativo del medico companero con 5 callouts numerados (hot-spots, trayectoria esperada, activacion fuera de spine, alta confianza, bordes de menor certeza) + colorbars + disclaimer. Sirve como leyenda fija para que el medico aprenda a leer el panel dinamico del 5.8 ANTES de ver su caso. Wire en gr.Image(interactive=False, height=300) arriba del explain_output. El handler language_radio.change ahora actualiza header_md + explain_md + reference_image en un solo round-trip (extension natural del 5.7/5.8). |
 | 2026-05-20 (Ciclo 5.9) | Recreacion programatica del mockup con scripts/generate_explain_reference.py en lugar de copiar el PNG original | El PNG original del medico companero no estaba disponible como path de archivo (solo como adjunto visual al chat). Recrear el panel con matplotlib + cv2 (sample radiograph S_22 + binary mask + simulated jet/RdYlGn overlays + callouts + colorbars) garantiza consistencia ES↔EN al 100%. Trade-off: la version recreada puede no coincidir pixel a pixel con el diseño original. Mitigacion: el script se commitea con `--lang es|en|both` para regenerar al cambiar strings o reemplazar la base. Si Elvis quiere el PNG exacto del medico, basta colocarlo manualmente en assets/ y re-correr el script solo para la traduccion EN. |
+| 2026-05-20 (Ciclo 5.10) | Convencion de lateralidad en `_curve_direction` = anatomia del paciente (NO perspectiva del viewer) | Las radiografias AP siguen la regla del espejo: el lado derecho del paciente aparece en el lado izquierdo de la imagen para quien la mira. Los informes radiologicos SIEMPRE describen lateralidad en anatomia del paciente, no en perspectiva del viewer. Nuestra app reportaba la convexidad en perspectiva del viewer — caso S_158 de la MaIA (anatomicamente right-convex) salia como "convexidad izquierda", confuso para el medico. Fix: swap del ternario en `cobb_angle.py:73` (right ↔ left). Cambio contained: i18n/app/viz no requieren tocarse, los strings "derecha"/"izquierda" siguen funcionando, solo cambia su significado. Documentado in-code con docstring extenso + regresion test que pinea el mapping post-fix. |
+| 2026-05-20 (Ciclo 5.10) | Sample base de la reference image: S_22 → S_200 | S_22 (Cobb 24.9°, mild) era una eleccion conservadora del 5.9 pero la compañera medica no lo reconocio como caso del dataset porque visualmente la columna se ve casi recta. S_200 muestra una S-curve clinicamente clara, suficiente para ilustrar Grad-CAM y Confidence Map en un caso pedagogicamente representativo sin ser tan extremo que el rendering se vea caricaturesco. Defaults del script bumped a S_200 para que cualquier re-generacion futura use el mismo caso "oficial". |

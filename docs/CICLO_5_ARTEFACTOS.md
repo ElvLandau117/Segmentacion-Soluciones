@@ -14,6 +14,7 @@
 > **Addendum 5.7** (2026-05-19): limpieza multiclass del frontend + toggle ES/EN. Ver sección 17.
 > **Addendum 5.8** (2026-05-20): polish del tab Explainability. Ver sección 18.
 > **Addendum 5.9** (2026-05-20): imagen fija de referencia clínica bilingüe en Explainability. Ver sección 19.
+> **Addendum 5.10** (2026-05-20): fix de convención de lateralidad (anatomía del paciente) + sample S_200. Ver sección 20.
 
 ---
 
@@ -1285,3 +1286,122 @@ para regenerar solo el EN con la misma plantilla.
   Gradio, la imagen se downscale-eará proporcionalmente; las
   proporciones del texto interno seguirán legibles porque las anotaciones
   son `fontsize 6-10pt` (representan ~12-20px en el render final).
+
+---
+
+## 20. Addendum 5.10 — Fix de convención de lateralidad clínica + sample S_200
+
+> **Fecha:** 2026-05-20.
+> **Motivación:** Feedback de la compañera médica (especialista, mensajes
+> WhatsApp del 2026-05-20 8:30–8:47 PM) tras probar el Space deployed del
+> Ciclo 5.9. Dos puntos:
+>
+> 1. **Bug clínico (alta prioridad).** Las radiografías AP siguen la regla
+>    del espejo: el lado derecho del paciente aparece en el lado izquierdo
+>    de la imagen para quien la mira. Los informes radiológicos SIEMPRE
+>    describen lateralidad en anatomía del paciente. La compañera identificó
+>    el caso `S_158.jpg`: la curva es anatómicamente right-convex pero la
+>    app la reportaba como "convexidad izquierda". Cita: *"la encontré
+>    mira por ejemplo esta la convexidad es derecha y se reporta como
+>    izquierda."*
+> 2. **UX educativo.** La compañera no reconoció la radiografía base del
+>    reference image del Ciclo 5.9 (S_22) como un caso del dataset MaIA
+>    — S_22 es modesto (Cobb 24.9°) y la columna se ve casi recta. Pidió
+>    cambiarlo por un caso más demostrativo. Elvis eligió `S_200`.
+
+### Diagnóstico del bug de lateralidad
+
+El helper `_curve_direction` ([cobb_angle.py:58-73](../spine_segmentation/evaluation/cobb_angle.py))
+opera sobre el spline `x = f(y)` (coordenadas de imagen, no anatomía).
+El código anterior `return "right" if mid_slope < 0 else "left"`
+asignaba labels en perspectiva del viewer:
+
+- Pendiente negativa en el midpoint → la columna se desplaza a la
+  izquierda del VIEWER al bajar → app reportaba "right".
+- Pero la convención radiológica dice que "right" debe referirse a la
+  derecha del PACIENTE = izquierda del viewer (regla del espejo).
+
+Resultado: para el caso S_158 (anatómicamente right-convex), el
+algoritmo computaba un mid_slope > 0 → return "left" → app mostraba
+"convexidad izquierda". Exactamente el bug reportado.
+
+### Cambios
+
+| Fix | Archivo | Detalle |
+|---|---|---|
+| **W** Convención clínica | [`cobb_angle.py:_curve_direction`](../spine_segmentation/evaluation/cobb_angle.py) | Swap del ternario en línea 73: `return "left" if mid_slope < 0 else "right"`. Docstring reescrita documentando explícitamente la convención del espejo + referencia a este ciclo + regression test. Comentario inline también deja claro que el swap es intencional. NO se tocan `i18n.py`, `app.py`, ni `visualize.py` — los strings "derecha"/"izquierda" siguen funcionando, sólo cambia su SIGNIFICADO (anatomía del paciente, no perspectiva del viewer). |
+| **X** Sample S_22 → S_200 | [`scripts/generate_explain_reference.py`](../scripts/generate_explain_reference.py) + 2 PNGs en `assets/` | Defaults `--sample-xray` y `--sample-mask` bumped a `S_200.jpg` y `Label_S_200.jpg` con comentario explicativo. Las 2 PNGs regeneradas (`~187 KB` ES, `~183 KB` EN). S_200 muestra una S-curve clínicamente clara, mejor para pedagogía. Layout invariante — sólo cambia la radiografía de fondo + simulación de overlays. |
+
+### Tests añadidos (Ciclo 5.10)
+
+1. `test_curve_direction_uses_patient_anatomy_convention` — Pinea el
+   mapping post-fix:
+   - `mid_slope < 0` → returns `"left"` (era "right" pre-Ciclo 5.10).
+   - `mid_slope > 0` → returns `"right"` (era "left" pre-Ciclo 5.10).
+   - `mid_slope ≈ 0` → `"neutral"` (sin cambio).
+   - Bad indices → `"unknown"` (sin cambio).
+
+   El test documenta la convención clínica en su docstring y referencia
+   el caso `S_158` como evidencia clínica. Cualquier refactor futuro que
+   re-invierta el ternario silenciosamente fallaría este test.
+
+Suite final: **63 passed + 1 skipped** (era 62 + 1).
+
+### Smoke remoto
+
+Vía `gradio_client.Client('ElvLandau/spine-segmentation').predict(
+handle_file('MaIA_Scoliosis_Dataset/Scoliosis/S_158.jpg'), 'Español',
+api_name='/predict')`:
+
+| Test | Resultado |
+|---|---|
+| `runtime.stage` post-rebuild | `RUNNING` ✓ |
+| Reporte para S_158: contiene `"convexidad derecha"` | ✓ (era `"izquierda"` antes del fix) |
+| Reference image servida es la base S_200 (`~187 KB`) | ✓ |
+| Toggle ES/EN sigue funcional sobre las 3 piezas (header_md + explain_md + reference_image) | ✓ |
+| Sin regresión en `/predict` (5 outputs) | ✓ |
+
+### Commits del Ciclo 5.10
+
+- `9dc24ea` fix(eval): correct curve direction to patient-anatomy convention
+- `dfedf0c` test(eval): pin patient-anatomy convexity convention
+- `c10c589` feat(assets): regenerate explainability reference with severe S-shape sample
+- `<este>` docs(cycle5): close cycle 5.10 — lateral convention fix + sample upgrade
+
+### Decisiones honestas
+
+- **Conservamos los strings "derecha"/"izquierda" en i18n** sin tocar.
+  El cambio es de SEMÁNTICA, no de WORDING: ahora "derecha" significa
+  derecha del paciente (estándar clínico). Si en el futuro alguien añade
+  texto helper como "(en la pantalla, a la izquierda del viewer)", se
+  puede hacer como mejora educativa — pero no es necesario para
+  corregir el bug.
+- **Honestidad sobre la teoría del slope.** En el docstring documenté
+  el resultado empírico (negativo → "left", positivo → "right" en
+  anatomía del paciente) y la evidencia clínica del caso S_158, sin
+  intentar derivar formalmente por qué el signo es el que es —
+  depende de la asimetría exacta de la curva y del muestreo del spline,
+  y una "demostración matemática" superficial sería frágil. El test
+  pinea el comportamiento empíricamente verificado.
+- **No añadimos flip horizontal en la UI.** La compañera fue clara:
+  la radiografía YA viene en convención espejo desde el equipo de
+  imagen — no debemos voltear la imagen, sólo nuestra interpretación
+  textual.
+
+### Limitaciones honestas
+
+- **Sample S_200 no es Cobb 90°** (no tengo el valor exacto del CSV en
+  este addendum). Si Elvis o la compañera prefieren un caso más
+  agresivo (S_158 sería 90°), basta re-correr el script con
+  `--sample-xray S_158.jpg`.
+- **Las flechas leader de los callouts apuntan a coordenadas fijas**
+  (calibradas originalmente para S_22). Para S_200 el spine está en
+  una posición ligeramente distinta, así que algunas flechas no
+  aterrizan exactamente en zonas del spine renderizado. El efecto
+  pedagógico se mantiene (las flechas SUGIEREN dónde mirar), pero si
+  Elvis quiere refinamiento pixel-perfect, ajustar `arrow_xy` en
+  `_build_figure` toma 5 minutos extra.
+- **El test de regresión usa inputs sintéticos**, no una imagen real.
+  Un test end-to-end con S_158 cargado a la pipeline real requeriría
+  los `.pth` checkpoints (gated por `requires_checkpoints`). El smoke
+  remoto contra el Space deployed cumple ese rol en producción.
