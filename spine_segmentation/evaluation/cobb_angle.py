@@ -58,10 +58,30 @@ def _cobb_between_inflection_points(dx_dy: np.ndarray, ip_a: int, ip_b: int) -> 
 def _curve_direction(dx_dy: np.ndarray, ip_a: int, ip_b: int) -> str:
     """Convexity direction of a curve between two inflection points.
 
-    Sign of the slope at the midpoint indexes the side the curve bulges to.
-    Negative slope (x decreases with y in our `x = f(y)` parameterization, which
-    in image coords means the spine moves LEFT as we go down) -> convexity
-    "right" (the curve apex bulges to the right). Positive -> "left".
+    Returns ``"right"``, ``"left"``, ``"neutral"``, or ``"unknown"``,
+    expressed in **CLINICAL / PATIENT-ANATOMY convention** — the standard
+    for radiological reports.
+
+    Convention reminder (Ciclo 5.10): AP radiographs follow the
+    "mirror" rule. The patient is imagined facing the viewer, so the
+    patient's RIGHT side appears on the VIEWER's LEFT side of the image
+    (and vice-versa). A clinician reading a radiograph always reports
+    laterality from the patient's anatomy, never from the viewer's
+    perspective.
+
+    Implementation: the sign of the midpoint slope of our ``x = f(y)``
+    spline maps to viewer-side convexity (sign convention determined
+    empirically against real cases). Before Ciclo 5.10 this function
+    returned the viewer-perspective label, which produced reports like
+    "convexidad izquierda" for cases that any clinician reading the
+    radiograph would call right-convex (e.g. ``S_158`` of the MaIA
+    dataset, flagged by our medical collaborator on 2026-05-20).
+
+    The Ciclo 5.10 fix swaps the right ↔ left mapping so the returned
+    label matches the radiological convention. See test
+    ``test_curve_direction_uses_patient_anatomy_convention`` for the
+    regression pin.
+
     Returns "unknown" if the indices are bad.
     """
     if ip_b <= ip_a or ip_b >= len(dx_dy):
@@ -70,7 +90,10 @@ def _curve_direction(dx_dy: np.ndarray, ip_a: int, ip_b: int) -> str:
     mid_slope = float(dx_dy[mid_idx])
     if abs(mid_slope) < 1e-3:
         return "neutral"
-    return "right" if mid_slope < 0 else "left"
+    # Patient-anatomy convention (NOT viewer perspective). See docstring.
+    # Before Ciclo 5.10 this returned "right" / "left" in the opposite
+    # order — viewer-side convexity — which broke radiological reading.
+    return "left" if mid_slope < 0 else "right"
 
 
 def cobb_from_binary(
