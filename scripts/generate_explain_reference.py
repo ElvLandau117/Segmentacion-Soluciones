@@ -413,14 +413,16 @@ def main() -> int:
     parser.add_argument(
         "--sample-xray",
         type=Path,
-        default=Path("MaIA_Scoliosis_Dataset/Scoliosis/S_22.jpg"),
-        help="Path to the X-ray image used as backdrop (default: S_22.jpg).",
+        default=Path("MaIA_Scoliosis_Dataset/Scoliosis/S_200.jpg"),
+        help="Path to the X-ray image used as backdrop (default: S_200.jpg, "
+             "chosen for Ciclo 5.10 — clearly visible S-shape suitable as "
+             "an educational reference. Previously was S_22.jpg in Ciclo 5.9).",
     )
     parser.add_argument(
         "--sample-mask",
         type=Path,
-        default=Path("MaIA_Scoliosis_Dataset/LabelBinaryJPG/Label_S_22.jpg"),
-        help="Path to the matching binary spine mask (default: Label_S_22.jpg).",
+        default=Path("MaIA_Scoliosis_Dataset/LabelBinaryJPG/Label_S_200.jpg"),
+        help="Path to the matching binary spine mask (default: Label_S_200.jpg).",
     )
     parser.add_argument(
         "--out-dir",
