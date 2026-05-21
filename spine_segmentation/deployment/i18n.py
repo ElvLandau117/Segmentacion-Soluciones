@@ -10,6 +10,8 @@ nudges the developer to fill them in. Use `t(key, lang)` from app.py.
 
 from __future__ import annotations
 
+import os
+
 DEFAULT_LANG = "es"
 SUPPORTED_LANGS = ("es", "en")
 
@@ -233,3 +235,28 @@ def explain_markdown(lang: str = DEFAULT_LANG) -> str:
 def label_to_lang(label: str) -> str:
     """Map a UI radio label ('Español' / 'English') to the lang code."""
     return LABEL_TO_LANG.get(label, DEFAULT_LANG)
+
+
+# ---------------------------------------------------------------------------
+# Static reference assets — Ciclo 5.9
+# ---------------------------------------------------------------------------
+# A clinical-collaborator mockup is rendered once per language by
+# `scripts/generate_explain_reference.py` and committed to disk under
+# `assets/`. The Gradio app shows it ABOVE the dynamic Grad-CAM /
+# Confidence panel so a clinician learns how to read the heatmaps before
+# seeing their own case.
+EXPLAIN_REFERENCE_FILES = {
+    "es": "explainability_reference_es.png",
+    "en": "explainability_reference_en.png",
+}
+
+
+def explain_reference_path(lang: str = DEFAULT_LANG) -> str:
+    """Absolute path to the static Explainability-tab reference PNG for `lang`.
+
+    Falls back to the default language when `lang` is unknown so the UI
+    never crashes on a typo — it just shows the Spanish version.
+    """
+    lang_key = lang if lang in EXPLAIN_REFERENCE_FILES else DEFAULT_LANG
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, "assets", EXPLAIN_REFERENCE_FILES[lang_key])

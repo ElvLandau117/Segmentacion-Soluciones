@@ -19,6 +19,7 @@ from spine_segmentation.data.transforms import get_inference_transforms, resize_
 from spine_segmentation.deployment.i18n import (
     DEFAULT_LANG,
     explain_markdown,
+    explain_reference_path,
     header_markdown,
     label_to_lang,
     t,
@@ -607,6 +608,17 @@ def create_app(
                     with gr.TabItem("Cobb Angle"):
                         cobb_output = gr.Image(label="Cobb Angle Measurement", height=400)
                     with gr.TabItem("Explainability"):
+                        # Ciclo 5.9: static clinical reference image sits ABOVE
+                        # the dynamic panel. The mockup teaches the clinician
+                        # how to read both heatmaps (numbered callouts + color
+                        # bars + disclaimer) before they see their own case.
+                        # Bilingual: swapped by language_radio.change.
+                        reference_image = gr.Image(
+                            value=explain_reference_path(DEFAULT_LANG),
+                            label="Guia de interpretacion / Interpretation guide",
+                            interactive=False,
+                            height=300,
+                        )
                         explain_output = gr.Image(label="Grad-CAM (left) | Confidence Map (right)", height=400)
                         # Ciclo 5.8: bilingual + clinically-worded explanation
                         # of how to read both panels. The component is tracked
@@ -691,19 +703,23 @@ def create_app(
             outputs=[binary_output, multi_output, cobb_output, explain_output, results_text],
         )
 
-        # Ciclo 5.7/5.8: language toggle updates BOTH the page header and the
-        # Explainability-tab markdown live. The diagnosis report and the
-        # explainability panel images are refreshed the next time the user
-        # presses Analyze (re-running the model just to retranslate fixed
-        # text would be wasteful).
+        # Ciclo 5.7/5.8/5.9: language toggle updates the page header, the
+        # Explainability-tab markdown AND the static reference image. The
+        # diagnosis report and the dynamic explainability panel are refreshed
+        # the next time the user presses Analyze (re-running the model just to
+        # retranslate fixed text would be wasteful).
         def _on_language_change(lbl: str):
             lang = label_to_lang(lbl)
-            return header_markdown(lang), explain_markdown(lang)
+            return (
+                header_markdown(lang),
+                explain_markdown(lang),
+                explain_reference_path(lang),
+            )
 
         language_radio.change(
             fn=_on_language_change,
             inputs=[language_radio],
-            outputs=[header_md, explain_md],
+            outputs=[header_md, explain_md, reference_image],
         )
 
         gr.Markdown(
