@@ -1333,3 +1333,51 @@ def test_explain_reference_path_distinct_per_lang():
     # Unknown lang collapses to default.
     assert DEFAULT_LANG == "es"
     assert explain_reference_path("xx") == es_path
+
+
+# ----------------------------------------------------------------------------
+# Ciclo 5.10 — convexity direction follows patient-anatomy convention
+# ----------------------------------------------------------------------------
+
+def test_curve_direction_uses_patient_anatomy_convention():
+    """Ciclo 5.10 regression pin for the lateral-convexity convention.
+
+    AP radiographs follow the mirror rule: the patient's RIGHT side
+    appears on the VIEWER's LEFT side of the image. Clinicians always
+    report laterality from the patient's anatomy, never from the
+    viewer's perspective.
+
+    Before Ciclo 5.10, ``_curve_direction`` returned viewer-side labels.
+    Our medical collaborator flagged case ``S_158`` of the MaIA dataset
+    (anatomically right-convex, reported as "convexidad izquierda") on
+    2026-05-20. The fix swaps the right ↔ left branches of the slope
+    ternary so the returned label matches the radiological reading.
+
+    This test pins the post-fix mapping so a future refactor cannot
+    silently re-invert the convention.
+    """
+    import numpy as np
+
+    from spine_segmentation.evaluation.cobb_angle import _curve_direction
+
+    # Clearly negative midpoint slope.
+    dx_dy_neg = np.array([0.0, -0.5, -1.0, -0.5, 0.0], dtype=np.float32)
+    assert _curve_direction(dx_dy_neg, ip_a=0, ip_b=4) == "left", (
+        "post-Ciclo-5.10: negative midpoint slope must return 'left' "
+        "(patient anatomy). Before the fix this returned 'right'."
+    )
+
+    # Clearly positive midpoint slope.
+    dx_dy_pos = np.array([0.0, 0.5, 1.0, 0.5, 0.0], dtype=np.float32)
+    assert _curve_direction(dx_dy_pos, ip_a=0, ip_b=4) == "right", (
+        "post-Ciclo-5.10: positive midpoint slope must return 'right' "
+        "(patient anatomy). Before the fix this returned 'left'."
+    )
+
+    # Near-zero slope still collapses to neutral (unchanged by the fix).
+    dx_dy_zero = np.array([0.0, 1e-5, 0.0, -1e-5, 0.0], dtype=np.float32)
+    assert _curve_direction(dx_dy_zero, ip_a=0, ip_b=4) == "neutral"
+
+    # Bad indices still return "unknown" (unchanged).
+    assert _curve_direction(dx_dy_neg, ip_a=4, ip_b=2) == "unknown"
+    assert _curve_direction(dx_dy_neg, ip_a=0, ip_b=99) == "unknown"
