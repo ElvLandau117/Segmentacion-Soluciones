@@ -1381,3 +1381,82 @@ def test_curve_direction_uses_patient_anatomy_convention():
     # Bad indices still return "unknown" (unchanged).
     assert _curve_direction(dx_dy_neg, ip_a=4, ip_b=2) == "unknown"
     assert _curve_direction(dx_dy_neg, ip_a=0, ip_b=99) == "unknown"
+
+
+# ----------------------------------------------------------------------------
+# Ciclo 5.11 — sample-invariant anchor derivation for reference image
+# ----------------------------------------------------------------------------
+
+def _import_generator_helpers():
+    """Tiny shim: the script lives under scripts/ which is not a package.
+    Add it to sys.path on first use so the helpers can be imported."""
+    import importlib
+    import sys
+    from pathlib import Path
+
+    scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    return importlib.import_module("generate_explain_reference")
+
+
+def test_derive_visual_anchors_places_blobs_outside_spine():
+    """Ciclo 5.11: anchor positions must be derived from the spine bbox so
+    callout arrows always land on something meaningful, no matter which
+    sample radiograph is used as the backdrop.
+
+    Pre-Ciclo-5.11 the script had hard-coded blob (cx, cy) and arrow_xy
+    values calibrated for S_22's spine layout. When the sample switched to
+    S_200 in Ciclo 5.10, those positions ended up over empty black areas
+    — the user reported 'apunta a cosas que no tienen sentido'."""
+    import numpy as np
+
+    gen = _import_generator_helpers()
+
+    # Synthetic mask: vertical bar in the right-of-center half (mimics
+    # the rough geometry of S_200's spine bbox).
+    mask = np.zeros((512, 512), dtype=np.uint8)
+    mask[50:450, 240:280] = 1
+
+    anchors = gen._derive_visual_anchors(mask)
+
+    cx, cy = anchors["centroid"]
+    assert 250 <= cx <= 270, f"centroid x should be ~260, got {cx}"
+    assert 240 <= cy <= 260, f"centroid y should be ~250, got {cy}"
+
+    xmin, ymin, xmax, ymax = anchors["bbox"]
+    assert (xmin, ymin, xmax, ymax) == (240, 50, 279, 449)
+
+    # Blob anchors must sit outside the spine bbox so the synthesized
+    # 'spurious' hotspots really are off-anatomy.
+    assert anchors["blob_top"][1] < ymin, "blob_top should be ABOVE the spine"
+    assert anchors["blob_pelvis"][1] > ymax, "blob_pelvis should be BELOW the spine"
+    assert anchors["blob_left"][0] < xmin, "blob_left should be LEFT of the spine"
+    assert anchors["blob_right"][0] > xmax, "blob_right should be RIGHT of the spine"
+
+    # Empty-mask fallback returns a usable dict (no crash).
+    empty = gen._derive_visual_anchors(np.zeros((512, 512), dtype=np.uint8))
+    for key in ("centroid", "bbox", "blob_top", "blob_pelvis", "blob_left", "blob_right"):
+        assert key in empty, f"fallback missing key: {key}"
+
+
+def test_pixel_to_figure_coords_handles_corners():
+    """Sanity: image (0, 0) maps to the top of the axes rect (figure y is
+    flipped vs image y); image (size, size) maps to the bottom-right."""
+    gen = _import_generator_helpers()
+
+    rect = (0.21, 0.30, 0.26, 0.58)  # left, bottom, width, height
+    # Top-left of image -> top-left of axes rect in figure coords.
+    fx, fy = gen._pixel_to_figure_coords(0, 0, rect, img_size=512)
+    assert fx == 0.21
+    assert abs(fy - (0.30 + 0.58)) < 1e-6  # = 0.88
+
+    # Bottom-right of image -> bottom-right of axes rect.
+    fx, fy = gen._pixel_to_figure_coords(512, 512, rect, img_size=512)
+    assert abs(fx - (0.21 + 0.26)) < 1e-6  # = 0.47
+    assert fy == 0.30
+
+    # A pixel halfway down the spine should land halfway down the rect.
+    fx, fy = gen._pixel_to_figure_coords(256, 256, rect, img_size=512)
+    assert abs(fx - (0.21 + 0.13)) < 1e-6   # 0.34
+    assert abs(fy - (0.30 + 0.29)) < 1e-6   # 0.59
