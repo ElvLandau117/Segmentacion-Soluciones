@@ -103,12 +103,14 @@ CALLOUT_COLOR = {
 }
 
 # ---------------------------------------------------------------------------
-# Figure layout constants (Ciclo 5.11): keeping them at module level so the
-# pixel-to-figure converter and _build_figure agree on the rectangles.
-# Each tuple is (left, bottom, width, height) in figure fraction.
+# Figure layout constants (Ciclo 5.11 + 5.12 refinements):
+# - AX_*_RECT  : (left, bottom, width, height) in figure fraction.
+# - FIG_SIZE_IN: figure dimensions in inches. Single source of truth so the
+#   bbox helper (Ciclo 5.12) and plt.figure(figsize=...) cannot drift apart.
 # ---------------------------------------------------------------------------
 AX_CAM_RECT = (0.21, 0.30, 0.26, 0.58)
 AX_CONF_RECT = (0.53, 0.30, 0.26, 0.58)
+FIG_SIZE_IN = (11.26, 7.16)
 
 
 def _derive_visual_anchors(spine_mask: np.ndarray) -> dict:
@@ -159,19 +161,71 @@ def _derive_visual_anchors(spine_mask: np.ndarray) -> dict:
     }
 
 
+def _imshow_bbox_in_figure(
+    ax_rect: tuple[float, float, float, float],
+    fig_size_in: tuple[float, float] = FIG_SIZE_IN,
+    img_aspect: float = 1.0,
+) -> tuple[float, float, float, float]:
+    """Return the rect (left, bottom, width, height) in figure fraction that
+    an ``aspect='equal'`` ``imshow`` of an image with the given ``img_aspect``
+    (= width / height) actually occupies inside ``ax_rect``.
+
+    Ciclo 5.12 — Background: matplotlib renders an aspect='equal' image at a
+    size that fits inside the axes rect WITHOUT stretching, and centers it
+    along the longer axis (default ``anchor='C'``). For a 512x512 image
+    (square, ``img_aspect=1.0``) inside an ax rect that is TALLER than wide
+    in inches (e.g. AX_CAM_RECT = 2.928 x 4.153 in), the image is rendered
+    at 2.928 x 2.928 in and centered vertically — with ~0.61 in of empty
+    space above and below.
+
+    Returns the actual image rect in figure fraction so callers (especially
+    ``_pixel_to_figure_coords``) can map image-pixel coordinates to figure
+    coordinates correctly.
+    """
+    left, bottom, width, height = ax_rect
+    fig_w_in, fig_h_in = fig_size_in
+    ax_w_in = width * fig_w_in
+    ax_h_in = height * fig_h_in
+    # Constrain the image so it fits inside ax_rect maintaining img_aspect.
+    if ax_w_in / img_aspect <= ax_h_in:
+        # Width-limited: image fills width, centered vertically.
+        img_w_in = ax_w_in
+        img_h_in = ax_w_in / img_aspect
+        new_left_in = left * fig_w_in
+        new_bottom_in = bottom * fig_h_in + (ax_h_in - img_h_in) / 2.0
+    else:
+        # Height-limited: image fills height, centered horizontally.
+        img_h_in = ax_h_in
+        img_w_in = ax_h_in * img_aspect
+        new_left_in = left * fig_w_in + (ax_w_in - img_w_in) / 2.0
+        new_bottom_in = bottom * fig_h_in
+    return (
+        new_left_in / fig_w_in,
+        new_bottom_in / fig_h_in,
+        img_w_in / fig_w_in,
+        img_h_in / fig_h_in,
+    )
+
+
 def _pixel_to_figure_coords(
     px: int, py: int,
     ax_rect: tuple[float, float, float, float],
     img_size: int = 512,
+    fig_size_in: tuple[float, float] = FIG_SIZE_IN,
 ) -> tuple[float, float]:
-    """Convert pixel (px, py) inside a ``size x size`` ``imshow`` to figure
-    fraction (fx, fy) using the axes rect ``(left, bottom, width, height)``.
+    """Convert pixel (px, py) inside a square ``img_size x img_size`` imshow
+    to figure fraction (fx, fy), accounting for matplotlib's aspect='equal'
+    centering when ax_rect is not square in inches.
 
-    Note: matplotlib figure y-axis is flipped vs image y-axis — image pixel
-    (0, 0) sits at the TOP of the axes rect, which is ``bottom + height`` in
-    figure coords.
+    Ciclo 5.12: previously this assumed the imshow filled the entire
+    ax_rect, which caused arrow targets to land ~56 px above the actual
+    rendered blobs when ax_rect was taller than wide. The fix delegates
+    the geometry to ``_imshow_bbox_in_figure`` and then does a straight
+    linear mapping inside that bbox (figure y is flipped vs image y, so
+    image pixel (0, 0) sits at the TOP of the image rect).
     """
-    left, bottom, width, height = ax_rect
+    img_rect = _imshow_bbox_in_figure(ax_rect, fig_size_in, img_aspect=1.0)
+    left, bottom, width, height = img_rect
     fx = left + (px / img_size) * width
     fy = bottom + ((img_size - py) / img_size) * height
     return (fx, fy)
@@ -387,7 +441,7 @@ def _build_figure(
     on the spine or on a visible off-anatomy blob — invariant to the
     specific sample radiograph used as backdrop.
     """
-    fig = plt.figure(figsize=(11.26, 7.16), dpi=100, facecolor="white")
+    fig = plt.figure(figsize=FIG_SIZE_IN, dpi=100, facecolor="white")
 
     # ---- Title strip (mimics the app's tab label, for visual continuity)
     ax_title = fig.add_axes([0.04, 0.93, 0.92, 0.05])
