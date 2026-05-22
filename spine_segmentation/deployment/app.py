@@ -21,6 +21,7 @@ from spine_segmentation.deployment.i18n import (
     explain_markdown,
     explain_reference_path,
     header_markdown,
+    instructions_markdown,
     label_to_lang,
     t,
 )
@@ -579,22 +580,32 @@ def create_app(
                 # accumulating rotations on whatever happens to be shown.
                 original_image_state = gr.State(value=None)
 
+                # Ciclo 6.2: compact usage instructions for first-time users
+                # — what to do if the radiograph came tilted, and what each
+                # output tab contains. Tracked so language_radio.change can
+                # rewrite it bilingually (same pattern as header_md).
+                instructions_md = gr.Markdown(instructions_markdown(DEFAULT_LANG))
+
                 # Ciclo 5.5: manual rotation. The clinician decides if the
                 # uploaded radiograph needs to be straightened before the
                 # binary Cobb pipeline (which fits x = f(y), assuming a
                 # vertical spine) sees it. Positive angle = counter-clockwise
                 # in display space (cv2 convention).
+                # Ciclo 6.2: slider label + Reset button now honor the i18n
+                # toggle (were hardcoded English since 5.5).
                 rotation_slider = gr.Slider(
                     minimum=-180,
                     maximum=180,
                     value=0,
                     step=1,
-                    label="Rotate image (degrees). Negative = clockwise.",
+                    label=t("rotation_slider_label", DEFAULT_LANG),
                 )
                 with gr.Row():
                     btn_rot_minus_90 = gr.Button("↺ -90°", size="sm")
                     btn_rot_minus_5 = gr.Button("↺ -5°", size="sm")
-                    btn_rot_reset = gr.Button("Reset", size="sm")
+                    btn_rot_reset = gr.Button(
+                        t("rotation_reset_button", DEFAULT_LANG), size="sm",
+                    )
                     btn_rot_plus_5 = gr.Button("↻ +5°", size="sm")
                     btn_rot_plus_90 = gr.Button("↻ +90°", size="sm")
                 predict_btn = gr.Button("Analyze", variant="primary", size="lg")
@@ -708,18 +719,30 @@ def create_app(
         # diagnosis report and the dynamic explainability panel are refreshed
         # the next time the user presses Analyze (re-running the model just to
         # retranslate fixed text would be wasteful).
+        # Ciclo 6.2: extended to also retranslate the new usage-instructions
+        # markdown plus the rotation slider label and the Reset button.
         def _on_language_change(lbl: str):
             lang = label_to_lang(lbl)
             return (
                 header_markdown(lang),
                 explain_markdown(lang),
                 explain_reference_path(lang),
+                instructions_markdown(lang),
+                gr.update(label=t("rotation_slider_label", lang)),
+                gr.update(value=t("rotation_reset_button", lang)),
             )
 
         language_radio.change(
             fn=_on_language_change,
             inputs=[language_radio],
-            outputs=[header_md, explain_md, reference_image],
+            outputs=[
+                header_md,
+                explain_md,
+                reference_image,
+                instructions_md,
+                rotation_slider,
+                btn_rot_reset,
+            ],
         )
 
         gr.Markdown(
