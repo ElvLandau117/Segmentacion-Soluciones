@@ -17,6 +17,7 @@
 > **Addendum 5.10** (2026-05-20): fix de convención de lateralidad (anatomía del paciente) + sample S_200. Ver sección 20.
 > **Addendum 5.11** (2026-05-20): fix de arrows del reference image (sample-invariant). Ver sección 21.
 > **Addendum 5.12** (2026-05-22): fix coord centering (aspect='equal') + DECISIONS.md + Gradio FileNotFound known-issue. Ver sección 22.
+> **Addendum 6.1** (2026-05-22): fix de lateralidad por chord signed-area (post-sustentación). Ver sección 23.
 
 ---
 
@@ -1696,3 +1697,166 @@ Vía `gradio_client` + curl:
 - **El `FileNotFoundError` puede seguir apareciendo en logs** — esto
   es upstream y no se va a resolver sin un upgrade de Gradio o un
   workaround complejo. Documentado en DECISIONS.md.
+
+---
+
+## 23. Addendum 6.1 — Fix de lateralidad por chord signed-area
+
+> **Fecha:** 2026-05-22 (post-sustentación, mismo día).
+> **Motivación:** Tras la sustentación del 2026-05-23, la médica
+> colaboradora reportó con 5 capturas que la app seguía reportando
+> lateralidad invertida en MUCHOS casos pese al fix del Ciclo 5.10.
+> Evidencia principal: una S-shape con principal T11-L2 88.2° +
+> secondary T4-T11 65.0° AMBAS reportadas como "izquierda" —
+> anatómicamente imposible porque las dos curvas separadas por un
+> inflection point tienen convexidades OPUESTAS por definición.
+
+### Diagnóstico del bug residual del Ciclo 5.10
+
+El helper del Ciclo 5.10 usaba `dx_dy[mid_idx]` (slope del spline en
+el midpoint geométrico entre los dos IPs) como proxy para el signo
+de la convexidad. Esto está mal en general porque:
+
+1. En una curva escoliotica el slope del spline pasa por cero EN EL
+   APEX, no en el midpoint geométrico.
+2. Si el apex está antes del midpoint → slope positivo en el mid;
+   si está después → negativo. El signo depende de la asimetría
+   TEMPORAL de la curva, no de la convexidad ANATÓMICA.
+3. En una S-shape ideal el algoritmo viejo a veces da "ambas izquierda"
+   porque el midpoint de cada una de las dos curvas separadas por el
+   IP central cae en zonas donde el slope tiene el mismo signo.
+
+El fix del Ciclo 5.10 (swap del ternario `right ↔ left`) cerró el
+caso pivote S_158 (caso clínicamente claro y simétrico) pero dejó
+abierto el problema general — sólo se notó porque la médica probó
+varias S-shapes después de la sustentación.
+
+### Algoritmo nuevo: chord signed-area
+
+La convexidad anatómica es, por definición geométrica clásica, el
+lado HACIA EL CUAL EL APEX SOBRESALE RESPECTO A LA CHORD que une los
+dos inflection points. Se calcula como el signo del SIGNED AREA
+entre la curva y la chord, vía la suma de los desplazamientos
+perpendiculares signados de cada punto interior:
+
+```
+signed_dist[i] = ((x[i]-x0)*chord_dy - (y[i]-y0)*chord_dx) / chord_len
+signed_area    = sum(signed_dist for i in [ip_a, ip_b])
+```
+
+Sumar todos los `signed_dist` desde `ip_a` hasta `ip_b` da
+`signed_area`. Su signo es la convexidad anatómica:
+
+- `signed_area > 0` → curva hacia viewer-RIGHT → patient LEFT → `"left"`
+- `signed_area < 0` → curva hacia viewer-LEFT  → patient RIGHT → `"right"`
+- `|signed_area| < threshold` (default 50 px²) → `"neutral"`
+
+Edge cases: índices inválidos, longitudes desiguales o chord
+degenerado → `"unknown"`.
+
+### Sweep visual baseline vs post-fix (12 casos)
+
+Antes de tocar código, `scripts/sweep_laterality.py` corrió sobre
+los 12 casos del dataset (`N_1, N_61, S_21, S_22, S_45, S_77,
+S_100, S_120, S_130, S_150, S_158, S_200`) bajo el código del
+Ciclo 5.10. La tabla baseline está en
+`outputs/sweep_laterality_baseline_cycle6_0.md`. Hallazgo clave:
+**5 de 7 detecciones de S-shape violaron el principio del IP**
+(ambas curvas reportadas con la misma convexidad). Un caso (`S_22`)
+disagreed con el ground truth oficial (`apex_x=116.8 < csvl_x=142`
+→ patient-right, app reportaba `left`).
+
+Tras el fix, el sweep se reejecutó (output en
+`outputs/sweep_laterality_cycle6_1.md`):
+
+| Métrica | Baseline (5.10) | Post-fix (6.1) |
+|---|---|---|
+| S-shapes con principio del IP cumplido | 1/7 | **6/7** |
+| Match contra GT oficial (S_22, S_158, S_200) | 2/3 | **3/3** |
+| Regresiones | — | **0** |
+
+El único caso "same-side" residual (N_61, columna normal con tilt
+-13°) NO es una S-shape clínica — son ondulaciones del spline en la
+misma dirección general, anatómicamente válidas para una columna
+desplazada. No se considera regresión.
+
+### Cambios
+
+| Cambio | Archivos | Detalle |
+|---|---|---|
+| **A** Algoritmo nuevo | `spine_segmentation/evaluation/cobb_angle.py` | `_curve_direction` reescrita con firma nueva `(x_eval, y_eval, ip_a, ip_b, neutral_threshold_px2=50.0)`. Callsite interno línea 274 actualizado. Docstring exhaustiva explicando motivación, regla del espejo y por qué el midpoint-slope era incorrecto. |
+| **B** Suite sintética nueva | `tests/test_app_smoke.py` | 6 tests reemplazan el pinneado del Ciclo 5.10: 2 parábolas, 1 S-shape (canary que falla bajo el código viejo), 1 chord casi-vertical, 1 neutral parametrizable, 1 edge cases combinados. |
+| **C** Tests anchored al GT | `tests/test_cobb_laterality_real.py` (nuevo) | 2 tests cargan `curves_csv/curve_{158,22}.csv` + `metrics_json/metrics_{158,22}.json`, calculan `expected` desde `apex_x` vs `csvl.x_px`, validan contra `_curve_direction`. Gated por skipif del dataset. |
+| **D** Script de sweep | `scripts/sweep_laterality.py` (nuevo) | CLI que procesa N casos vía `SpineSegmentationPipeline.predict()` y emite tabla MD/CSV. Reutilizable para futuros ciclos. |
+
+### Tests añadidos
+
+- `test_curve_direction_synthetic_parabola_convex_right_patient`
+- `test_curve_direction_synthetic_parabola_convex_left_patient`
+- `test_curve_direction_s_shape_returns_opposite_lateralities` (canary)
+- `test_curve_direction_strong_curve_with_near_vertical_chord_still_works`
+- `test_curve_direction_below_threshold_returns_neutral`
+- `test_curve_direction_invalid_indices_and_degenerate_chord_return_unknown`
+- `test_curve_direction_matches_maia_ground_truth_s_158` (anchored)
+- `test_curve_direction_matches_maia_ground_truth_s_22` (anchored)
+
+Eliminado: `test_curve_direction_uses_patient_anatomy_convention`
+(Ciclo 5.10) — pinneaba el comportamiento del midpoint-slope, ya
+no aplica.
+
+Suite final: **73 passed + 1 skipped** (era 66 + 1).
+
+### Smoke remoto (vía `gradio_client`)
+
+| Caso | Reportado post-deploy | Expectativa | Match? |
+|---|---|---|:-:|
+| S_158 | `Curva principal: 68.3 deg (T2 - T8, convexidad derecha)` | right (GT + 5.10 pivot) | ✓ |
+| S_22 | `Curva principal: 19.5 deg (T6 - T9, convexidad derecha)` | right (GT) — antes `left` | ✓ (FIX) |
+| S_100 | `principal 83.3 deg (... derecha) + secundaria 61.3 deg (... izquierda)` | opposing (S-shape) — antes ambas `right` | ✓ (FIX) |
+| S_200 | `Curva principal: 34.0 deg (T3 - T11, convexidad derecha)` | right (GT) | ✓ |
+
+### Commits del Ciclo 6.1
+
+- `967be9c` feat(scripts): add laterality sweep script + baseline run (cycle 6.1)
+- `0c10db5` fix(eval): replace midpoint-slope with chord signed-area for curve direction
+- `22a9b8d` test(eval): pin chord signed-area convention with synthetic curves + S-shape
+- `010bea9` test(eval): anchor laterality regression to MaIA ground truth (S_158, S_22)
+- `<este>` docs(cycle6): close cycle 6.1 — chord signed-area fix for laterality
+
+### Aprendizajes
+
+- **Un fix basado en un solo caso (S_158 en Ciclo 5.10) no escala.**
+  El swap del ternario era "minimum viable fix" para cerrar el caso
+  pivote, pero el algoritmo subyacente era estructuralmente débil.
+  Lección operativa: cuando un fix se basa en evidencia de UN caso,
+  agregar test contra dataset oficial + sweep visual sobre N≥10
+  casos antes de declarar cerrado el ciclo.
+- **El ground truth oficial del dataset es navegable y útil para
+  tests anchored.** `RadiographMetrics/metrics_json/` tiene
+  `i_apex_global` + `csvl.x_px` por cada caso anotado. Esto habilita
+  validación sin invocar el pipeline de inferencia (más rápido que
+  un smoke remoto + sin dependencia de checkpoints).
+- **El sweep visual con tabla MD es la forma más eficiente de captar
+  regresiones cualitativas que pytest no puede ver** (e.g., "S-shape
+  reporta lateralidades opuestas"). Mantener `sweep_laterality.py`
+  como herramienta de futuros ciclos.
+
+### Limitaciones honestas / known issues
+
+- **El dataset oficial sólo anota la curva principal**, no las
+  secundarias. Los tests anchored del 6.1 validan solo la principal;
+  las secundarias se validan vía el canary sintético del S-shape +
+  sweep visual con el médico.
+- **El threshold `neutral_threshold_px2=50.0` fue calibrado por
+  intuición** (mean perpendicular < 0.1 px sobre el grid de 500
+  samples del spline). Si Elvis o la médica observan casos
+  marcados como `neutral` que clínicamente no deberían serlo,
+  ajustar este valor.
+- **Bug separado pendiente — "T6-T5" en secundaria (candidato 6.2)**:
+  la captura Image 2 del feedback de la médica mostraba una curva
+  secundaria reportada como `T6-T5` (upper > lower, anatómicamente
+  raro). Vive en `assign_vertebra_names_to_curves` (orden de upper/
+  lower no se valida), NO en `_curve_direction`. Decisión de Elvis:
+  ciclo 6.2.
+- **No re-entrenamos nada**. El fix es 100% post-procesamiento del
+  spline.

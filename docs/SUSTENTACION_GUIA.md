@@ -361,8 +361,16 @@ Spaces.
 **R**: Estándar radiológico clínico = anatomía del paciente, no
 perspectiva del viewer. En radiografía AP el lado derecho del paciente
 aparece a la izquierda de la imagen. Implementado en
-`_curve_direction` del Ciclo 5.10. Caso S_158 (que mostraremos en la
-demo) ahora reporta "convexidad derecha" correctamente.
+`_curve_direction` del Ciclo 5.10 y **refinado en el Ciclo 6.1**
+(2026-05-22, post-sustentación) tras feedback de la médica
+colaboradora sobre S-shapes. El algoritmo actual usa **chord
+signed-area** (signo del área entre la curva y la chord que une los
+dos inflection points) — invariante a la asimetría temporal de la
+curva y garantiza convexidades opuestas para las dos curvas de un
+S-shape. Caso S_158 sigue reportando "convexidad derecha"; S_22
+ahora reporta "right" (era "left" pre-6.1, en disagreement con el
+ground truth oficial). Detalle en
+`docs/CICLO_5_ARTEFACTOS.md` sec 23.
 
 ### Q7. "¿Qué pasa si la radiografía es de calidad pobre?"
 **R**: Graceful degradation:

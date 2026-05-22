@@ -32,17 +32,31 @@
 | **5.12** | Coord centering bug | Fix de `_pixel_to_figure_coords` para `aspect='equal'` centering. `_imshow_bbox_in_figure` computa el rect real. Constante `FIG_SIZE_IN`. |
 | **5.12** | DECISIONS.md | Este archivo. AGENTS.md sec 9 sigue como source-of-truth completa. |
 | **6.0** | Pre-sustentación | Fix README placeholders `<usuario>` → `ElvLandau` (20 reemplazos, era bug latente del Ciclo 4). Crear `modelos/`+`datos/` con READMEs explicativos (rúbrica Coursera). Commit notebook alternativo del equipo (Keras+Colab) como `02b_*alternativo*`. Crear `SUSTENTACION_GUIA.md` (~476 LOC, 12 secciones) como guía operativa para defensa oral. Solo docs, sin cambios de código. |
+| **6.1** | Lateralidad clínica (post-sustentación) | Reemplazo del helper `_curve_direction` por algoritmo chord signed-area (signo del área entre la curva y la chord IPa-IPb). Invariante a la asimetría temporal de la curva → S-shapes reportan convexidades opuestas. Sweep visual sobre 12 casos: 5/7 S-shapes violaban el principio del IP pre-fix → 6/7 lo cumplen post-fix. 3/3 contra GT oficial. Tests anchored a `MaIA/RadiographMetrics/`. Script `sweep_laterality.py` reutilizable. |
 
 ---
 
 ## Por tema clínico
 
-### Convención de lateralidad (Ciclo 5.10)
+### Convención de lateralidad (Ciclo 5.10 + refinamiento 6.1)
 La app reporta SIEMPRE en **anatomía del paciente** (estándar radiológico).
 En radiografía AP, el lado derecho del paciente aparece a la izquierda del
 viewer. Caso de regresión: `S_158` debe reportar "convexidad derecha"
 porque la columna se curva hacia la derecha del paciente (= a la izquierda
 del viewer en la imagen). Implementado en `cobb_angle.py:_curve_direction`.
+
+**Ciclo 6.1 (refinamiento, 2026-05-22 post-sustentación)**: el helper del
+5.10 usaba `dx_dy[mid_idx]` como proxy para la convexidad, lo que funciona
+en curvas simétricas (S_158) pero falla en S-shapes y curvas asimétricas
+porque el slope del spline pasa por cero EN EL APEX, no en el midpoint
+geométrico. Tras la sustentación, la médica reportó S-shapes con AMBAS
+curvas reportadas misma convexidad (imposible por definición del IP). Fix
+6.1: algoritmo chord signed-area — convexidad = signo del signed area
+entre la curva y la chord que une los dos IPs. Geométricamente invariante,
+garantiza opposing convexity en cada inflection. Sweep baseline (5.10):
+5/7 S-shapes violaban el principio. Sweep post-fix (6.1): 6/7 lo cumplen +
+3/3 contra GT oficial (`apex_x` vs `csvl.x_px`). Detalle en
+[`CICLO_5_ARTEFACTOS.md` sec 23](CICLO_5_ARTEFACTOS.md).
 
 ### Cobb Severity (Ciclo 5)
 Calculado sobre Cobb binary (más robusto: MAE 23°, r=0.66) — NO sobre

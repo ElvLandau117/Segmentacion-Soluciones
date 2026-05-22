@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-22 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12, 6.0 ✅ COMPLETOS. Ciclo 6.1+ : pendiente post-sustentación.
+> Ultima actualizacion: 2026-05-22 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12, 6.0, 6.1 ✅ COMPLETOS. Ciclo 6.2+ : pendiente.
 >
 > **📋 Indice navegable de decisiones**: [`docs/DECISIONS.md`](docs/DECISIONS.md) (desde Ciclo 5.12).
 > **🎤 Guia de sustentacion**: [`docs/SUSTENTACION_GUIA.md`](docs/SUSTENTACION_GUIA.md) (Ciclo 6.0).
@@ -714,7 +714,62 @@ Cambios:
 
 Artefacto: [`docs/CICLO_6_ARTEFACTOS.md`](docs/CICLO_6_ARTEFACTOS.md).
 
-### Ciclo 6.1+ (post-sustentacion) — Refinamiento del modelo + entrega final
+### Ciclo 6.1 ✅ COMPLETO — Fix de lateralidad por chord signed-area
+Post-sustentacion (2026-05-22): la medica colaboradora reporto con 5
+capturas que la lateralidad seguia saliendo invertida en MUCHOS casos
+pese al fix del Ciclo 5.10. Evidencia principal: una S-shape con
+principal T11-L2 88.2° + secondary T4-T11 65.0° AMBAS reportadas
+"izquierda" — anatomicamente imposible porque las dos curvas
+separadas por un inflection point tienen convexidades OPUESTAS por
+definicion.
+
+Diagnostico raiz: el helper del Ciclo 5.10 usaba `dx_dy[mid_idx]`
+(slope del spline en el midpoint geometrico entre los dos IPs) como
+proxy para la convexidad. Eso falla porque el slope pasa por cero EN
+EL APEX, no en el midpoint — el signo en el mid depende de la
+asimetria temporal de la curva, no de la convexidad anatomica.
+
+Cambios:
+
+- [x] **Algoritmo nuevo `_curve_direction` (chord signed-area)** en
+      [`spine_segmentation/evaluation/cobb_angle.py`](spine_segmentation/evaluation/cobb_angle.py).
+      Firma nueva `(x_eval, y_eval, ip_a, ip_b, neutral_threshold_px2=50.0)`.
+      Convexidad = signo del signed area entre la curva y la chord
+      que une los 2 IPs (cross product 2D normalizado). Invariante a
+      asimetria temporal, garantiza opposing en S-shapes.
+- [x] **Suite sintetica nueva** (6 tests) en `tests/test_app_smoke.py`:
+      parabolas right/left, S-shape canary (falla bajo Ciclo 5.10),
+      chord casi-vertical, neutral threshold parametrizable, edge cases.
+- [x] **Tests anchored al ground truth oficial** en
+      [`tests/test_cobb_laterality_real.py`](tests/test_cobb_laterality_real.py)
+      (nuevo): S_158 y S_22 validan contra `apex_x` vs `csvl.x_px` del
+      `metrics_json/` oficial. Gated por skipif del dataset.
+- [x] **Script de sweep visual** en
+      [`scripts/sweep_laterality.py`](scripts/sweep_laterality.py) (nuevo):
+      CLI que procesa N casos via `SpineSegmentationPipeline.predict()`
+      y emite tabla MD/CSV. Reutilizable para futuros ciclos.
+- [x] **Sweep baseline vs post-fix sobre 12 casos**: 5/7 S-shapes
+      violaban el principio del IP pre-fix; 6/7 lo cumplen post-fix.
+      3/3 contra GT oficial post-fix (era 2/3). Outputs en
+      `outputs/sweep_laterality_baseline_cycle6_0.md` y
+      `outputs/sweep_laterality_cycle6_1.md`.
+- [x] **Deploy via upload_to_space.py** + smoke remoto sobre 4 casos
+      (S_158, S_22, S_100, S_200) — todos reportan la lateralidad
+      esperada. S_22 cambio de `left` a `right`, S_100 ahora reporta
+      `principal derecha + secundaria izquierda` (era `right + right`).
+- [x] **Suite pytest**: 73 passed + 1 skipped (era 66 + 1; -1 test
+      del Ciclo 5.10 reemplazado, +6 sinteticos +2 anchored).
+
+Conocido pendiente (no parte del 6.1, decision de Elvis):
+
+- [ ] **Ciclo 6.2 candidato**: bug separado en
+      `assign_vertebra_names_to_curves` que reporta `T6-T5` como
+      secundaria (upper > lower, anatomicamente raro). Vive en otra
+      funcion. Documentado como known issue.
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 23.
+
+### Ciclo 6.2+ (post-sustentacion) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
 - [ ] Enmascarar confidence map por la prediccion (idea identificada Ciclo 5)
@@ -938,3 +993,7 @@ Orden corto:
 | 2026-05-22 (Ciclo 6.0) | Crear `modelos/` y `datos/` con README explicativo en lugar de subir pesos/data al repo | La rubrica Coursera/U. Andes exige 3 carpetas raiz: `notebooks/`, `modelos/`, `datos/`. Las dos ultimas estaban ausentes. Decision: NO subir los pesos (226 MB de .pth, viven en HF Hub desde Ciclo 4) ni el dataset (propiedad U. Andes, no redistribuible). En su lugar, READMEs de ~70 lineas cada uno que explican DONDE viven los artifacts reales + como obtenerlos. Satisface la letra de la rubrica + da contexto al evaluador en 30 seg de lectura. |
 | 2026-05-22 (Ciclo 6.0) | Commitear notebook alternativo del equipo como `02b_training_alternativo_unet_keras.ipynb` (4.8 MB) | Julian (companero) desarrollo un pipeline en Keras/TensorFlow + Colab paralelo al pipeline PyTorch + SMP de Elvis. Es trabajo del equipo y aporta valor comparativo (sus metricas Dice 0.88 binario coinciden con el paper IEEE). Convencion de nombre: `0Nb_*.ipynb` marca "variante de 0N" — el principal `02_training_experiments.ipynb` (PyTorch, 5 modelos) sigue siendo el que alimenta el deploy. Cero etiquetado por persona (decision de Elvis: presentar como trabajo equipo). Tamano 4.8 MB aceptado as-is; si el repo se siente lento en post-mortem, nbstripout reduce ~80%. |
 | 2026-05-22 (Ciclo 6.0) | `docs/SUSTENTACION_GUIA.md` como artefacto operativo para la defensa oral | Mas valioso del ciclo. Documento de ~476 lineas en 12 secciones que une informe IEEE + repo + deploy: resumen ejecutivo, equipo, mapping rubrica/paper/app, **metricas explicadas (CRITICO para Q&A sobre el gap Dice binario 0.88 vs multiclass 0.34)**, demo paso-a-paso para 5 min de pantalla compartida, narrativa 10 min con timing, 10 Q&A anticipadas con respuestas concretas, cheat sheet de numeros, plan B si algo falla en vivo. Elvis lo abre en el browser mientras presenta y sigue punto por punto. Markdown (no PDF) para editar last-minute si surge feedback en el dry-run. |
+| 2026-05-22 (Ciclo 6.1) | Reemplazar `_curve_direction` midpoint-slope (Ciclo 5.10) por algoritmo chord signed-area | El fix del Ciclo 5.10 fue minimum-viable-fix: swap de un ternario basado en evidencia de UN solo caso (S_158, validado por la medica colaboradora). Tras la sustentacion, la misma medica reporto con 5 capturas que la lateralidad seguia invertida en MUCHOS casos — en particular, S-shapes que reportaban ambas curvas con la misma convexidad (anatomicamente imposible por definicion del IP). Diagnostico de raiz: `dx_dy[mid_idx]` no es invariante a la asimetria temporal de la curva — el slope pasa por cero EN EL APEX, no en el midpoint geometrico. Algoritmo nuevo: signo del signed area entre la curva y la chord IPa-IPb (cross product 2D normalizado). Geometricamente correcto, garantiza opposing convexity en S-shapes. Sweep baseline: 5/7 S-shapes violaban el principio; post-fix: 6/7 cumplen + 3/3 contra GT oficial. |
+| 2026-05-22 (Ciclo 6.1) | Cambio de firma de `_curve_direction` (`dx_dy` -> `x_eval, y_eval`) sin rompimiento externo | El algoritmo nuevo necesita las coordenadas del spline, no solo la primera derivada. La firma cambia de `(dx_dy, ip_a, ip_b)` a `(x_eval, y_eval, ip_a, ip_b, neutral_threshold_px2=50.0)`. Verifique con grep que el unico caller esta en `_cobb_from_binary_single_pass` linea 274 del mismo modulo, donde `x_eval` y `y_eval` ya estan en scope (lineas 221-222). Cambio completamente contained — `i18n.py`, `app.py`, `inference.py`, `visualize.py` no se tocan. Los strings `convex_right`/`convex_left` se reutilizan: solo cambia su significado algoritmico, no su mapping ni su texto. |
+| 2026-05-22 (Ciclo 6.1) | Tests anchored al ground truth oficial de MaIA (`tests/test_cobb_laterality_real.py`) | El Ciclo 5.10 cerro sobre evidencia de 1 caso y no agrego test pinneado contra dataset real — eso fue parte de por que el bug residual paso desapercibido hasta post-sustentacion. Decision: agregar tests que cargan `RadiographMetrics/curves_csv/curve_*.csv` + `metrics_json/metrics_*.json` directamente, calculan `expected_direction = "right" if apex_x < csvl_x else "left"` (regla del espejo en AP), y validan contra `_curve_direction`. Gated por `skipif(not dataset_present)` para no romper CI si el dataset no esta montado. Cobre S_158 (pivot 5.10) y S_22 (caso flagged por el sweep baseline). Solo principal porque el dataset oficial no anota secundarias — secundarias se cubren por el canary sintetico de S-shape. |
+| 2026-05-22 (Ciclo 6.1) | `scripts/sweep_laterality.py` como herramienta reutilizable para futuros ciclos | El sweep visual con tabla MD es la unica forma de captar regresiones cualitativas que pytest no puede ver (e.g., "las dos curvas de una S-shape reportan opposing laterality"). Diseñe el script para que sea reusable: lista de casos parametrizable, paths del dataset y checkpoints overrideable via flags, output a markdown + CSV. Funciona desde cualquier worktree (sys.path insert del repo root) y el resolver del MAIA dataset busca arriba en los ancestors. Se commitea en el worktree del 6.1 pero queda disponible para 6.2+. Outputs van a `outputs/` (gitignored) por tipo de ciclo. |

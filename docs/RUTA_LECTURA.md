@@ -55,15 +55,22 @@ Aquí obtienes:
 
 ## 🎯 04. Lee el artefacto del último ciclo cerrado
 
-**Archivo:** [`docs/CICLO_3_ARTEFACTOS.md`](CICLO_3_ARTEFACTOS.md)
+**Archivo:** [`docs/CICLO_5_ARTEFACTOS.md`](CICLO_5_ARTEFACTOS.md) (con addenda hasta 6.1)
+
+Lee la última sección activa (al cierre del Ciclo 6.1, es la **sección 23**:
+"Addendum 6.1 — Fix de lateralidad por chord signed-area"). Las secciones
+anteriores (1-22) son la historia operativa de los ciclos 5.x y 6.0.
 
 Aquí obtienes:
-- **Modelos entrenados** con métricas finales (Test Dice, IoU, PixAcc)
-- **Hallazgos clave** del ciclo (DeepLabV3+ ganó a transformers)
-- **Limitaciones identificadas**
-- **Recursos disponibles** para continuar (pesos, paquete OneDrive)
+- **Cambio más reciente al algoritmo** y por qué (post-sustentación)
+- **Tabla baseline vs post-fix** del sweep de 12 casos
+- **Tests añadidos / actualizados** + commits del ciclo
+- **Aprendizajes y limitaciones honestas**
 
-⏱ Tiempo estimado: **10 minutos**
+Para resultados de entrenamiento, consulta [`docs/CICLO_3_ARTEFACTOS.md`](CICLO_3_ARTEFACTOS.md)
+(modelos entrenados, métricas finales, DeepLabV3+ como ganador).
+
+⏱ Tiempo estimado: **15 minutos**
 
 ---
 
