@@ -31,6 +31,7 @@
 | **5.11** | Sample-invariant arrows | Posiciones de blobs y arrows DERIVADAS del spine bbox (no hardcoded). Helpers `_derive_visual_anchors` + `_pixel_to_figure_coords`. |
 | **5.12** | Coord centering bug | Fix de `_pixel_to_figure_coords` para `aspect='equal'` centering. `_imshow_bbox_in_figure` computa el rect real. Constante `FIG_SIZE_IN`. |
 | **5.12** | DECISIONS.md | Este archivo. AGENTS.md sec 9 sigue como source-of-truth completa. |
+| **6.0** | Pre-sustentación | Fix README placeholders `<usuario>` → `ElvLandau` (20 reemplazos, era bug latente del Ciclo 4). Crear `modelos/`+`datos/` con READMEs explicativos (rúbrica Coursera). Commit notebook alternativo del equipo (Keras+Colab) como `02b_*alternativo*`. Crear `SUSTENTACION_GUIA.md` (~476 LOC, 12 secciones) como guía operativa para defensa oral. Solo docs, sin cambios de código. |
 
 ---
 

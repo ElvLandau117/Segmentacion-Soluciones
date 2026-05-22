@@ -1,8 +1,14 @@
-# Prompt para el próximo chat — Ciclo 6 (refinamiento del modelo + entrega)
+# Prompt para el próximo chat — Ciclo 6.1+ (post-sustentación)
 
-> **Estado al 2026-05-22:** Ciclos 1, 2, 3, 4, 5, 5.1..5.12 ✅ COMPLETOS.
-> Ciclo 6 NO tiene brief todavía — el primer paso del próximo chat es
-> definirlo y aprobarlo con Elvis antes de implementar.
+> **Estado al 2026-05-22:** Ciclos 1, 2, 3, 4, 5, 5.1..5.12, 6.0 ✅ COMPLETOS.
+> Sustentación oral programada para 2026-05-23. El primer paso del
+> próximo chat es recoger feedback de la sustentación y priorizar las
+> mejoras del Ciclo 6.1+ con Elvis antes de implementar.
+>
+> **Atajos rápidos**:
+> - `docs/SUSTENTACION_GUIA.md` — guía operativa usada en la defensa
+> - `docs/DECISIONS.md` — índice navegable de decisiones por ciclo
+> - `docs/CICLO_6_ARTEFACTOS.md` — qué entregó el Ciclo 6.0
 
 ---
 

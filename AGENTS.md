@@ -2,9 +2,10 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-22 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-22 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12, 6.0 ✅ COMPLETOS. Ciclo 6.1+ : pendiente post-sustentación.
 >
 > **📋 Indice navegable de decisiones**: [`docs/DECISIONS.md`](docs/DECISIONS.md) (desde Ciclo 5.12).
+> **🎤 Guia de sustentacion**: [`docs/SUSTENTACION_GUIA.md`](docs/SUSTENTACION_GUIA.md) (Ciclo 6.0).
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -647,7 +648,73 @@ DECISIONS.md como indice navegable, y documentar el `FileNotFoundError
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 22.
 
-### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
+### Ciclo 6.0 ✅ COMPLETO — Pre-sustentacion (rubrica + README + guia oral)
+Elvis tiene sustentacion del proyecto MAÑANA (2026-05-23). Pidio
+verificar (a) que la rubrica Coursera/U. Andes esta expuesta claramente,
+(b) el estado de GitHub (data, pesos, notebooks), (c) tener una guia
+clara para explicar y sustentar el proyecto uniendo informe IEEE +
+plataforma + despliegue.
+
+Hallazgos criticos de la exploracion:
+- README tenia 8 ocurrencias del placeholder `<usuario>/spine-segmentation`
+  (jurado leeria "por completar tras crear el Space" cuando la app YA
+  llevaba semanas RUNNING — bug latente desde Ciclo 4).
+- `docs/HF_SPACES_SETUP.md` tenia 12 ocurrencias del mismo placeholder.
+- Rubrica exige 3 carpetas raiz: `notebooks/` ✅, `modelos/` ❌, `datos/`
+  ❌. Habia que crear las 2 faltantes con READMEs explicativos.
+- Notebook del companero (Julian) `escoliosos_colab_Jul.ipynb` (4.8 MB)
+  existia local pero NO commiteado al repo.
+- Paper IEEE reporta Dice binario 0.88; repo enfatiza Dice multiclass
+  0.34 — son tareas distintas, no contradictorias, pero hay que armar
+  la narrativa explicita para que Elvis no se trabe en Q&A.
+
+Cambios:
+
+- [x] **Fix README placeholders** (`README.md` + `docs/HF_SPACES_SETUP.md`):
+      20 reemplazos via sed de `<usuario>` → `ElvLandau`. Audit
+      post-fix: grep retorna 0 ocurrencias del placeholder; 22
+      ocurrencias nuevas de `ElvLandau/spine-segmentation`. URL real
+      visible en la primera tabla del README ahora.
+- [x] **Notebook del equipo committeado** como
+      [`notebooks/02b_training_alternativo_unet_keras.ipynb`](notebooks/02b_training_alternativo_unet_keras.ipynb)
+      (4.8 MB). Convencion de nombre `0Nb_*.ipynb` marca "variante de
+      0N" — el principal `02_training_experiments.ipynb` (Elvis,
+      PyTorch+SMP, 5 modelos) sigue siendo el que alimenta el deploy.
+      [`notebooks/README.md`](notebooks/README.md) (tabla de los 4
+      notebooks) aclara cual es el desplegado.
+- [x] **Carpetas `modelos/` y `datos/`** creadas con READMEs
+      explicativos (~150 LOC total), satisfaciendo la rubrica letra
+      sin duplicar bytes:
+      [`modelos/README.md`](modelos/README.md) explica que los pesos
+      viven en HF Hub `ElvLandau/spine-checkpoints` (226 MB, decision
+      Ciclo 4).
+      [`datos/README.md`](datos/README.md) explica que el dataset es
+      propiedad U. Andes (no redistribuible) + estructura esperada +
+      contacto para acceso academico.
+- [x] **[`docs/SUSTENTACION_GUIA.md`](docs/SUSTENTACION_GUIA.md)** —
+      documento operativo (~476 lineas) en 12 secciones para que Elvis
+      lo abra en el browser durante la presentacion:
+      1) resumen ejecutivo,
+      2) equipo + division del trabajo,
+      3) entregables verificables + mapping rubrica,
+      4) mapeo paper IEEE ↔ app deployada (tabla),
+      5) **metricas explicadas** (CRITICO para Q&A: Dice binario 0.88
+         vs multiclass 0.34 NO son contradictorias),
+      6) demo paso-a-paso (6 actos, ~5 min: tour UI → S_158 severo →
+         Explainability → slider rotacion N_61 → multi-curva S_100 →
+         cierre),
+      7) narrativa 10 min con timing,
+      8) **10 Q&A anticipadas** con respuestas concretas,
+      9) cheat sheet de numeros clave,
+      10) links rapidos para tabs abiertos,
+      11) plan B si algo falla en vivo,
+      12) recordatorios finales (honestidad, disclaimer, pausa).
+- [x] **Sin deploy al Space** — este ciclo es solo docs. Tests siguen
+      verdes (66 passed + 1 skipped). Space sigue RUNNING.
+
+Artefacto: [`docs/CICLO_6_ARTEFACTOS.md`](docs/CICLO_6_ARTEFACTOS.md).
+
+### Ciclo 6.1+ (post-sustentacion) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
 - [ ] Enmascarar confidence map por la prediccion (idea identificada Ciclo 5)
@@ -867,3 +934,7 @@ Orden corto:
 | 2026-05-22 (Ciclo 5.12) | `_pixel_to_figure_coords` debe compensar el centering de `aspect='equal'` cuando ax_rect no es cuadrada en inches | Mi propio fix del Ciclo 5.11 tenia un bug latente: asumi que el imshow llenaba toda la ax_rect, pero matplotlib renderiza un imagen 512x512 con `aspect='equal'` como un cuadrado centrado dentro del rect (anchor='C' default). Para AX_CAM_RECT (2.928 in wide x 4.153 in tall), la imagen sale 2.928 x 2.928 con 0.61 in (61 px) de margen arriba y abajo. Resultado: las flechas aterrizaban ~56 px ARRIBA de los blobs. Fix: nuevo `_imshow_bbox_in_figure(ax_rect, fig_size_in, img_aspect)` computa el rect real del imshow; `_pixel_to_figure_coords` delega ahi y hace un mapping lineal dentro del bbox real. Constante `FIG_SIZE_IN = (11.26, 7.16)` a tope del modulo es source-of-truth (usada tanto por el bbox helper como por `plt.figure(figsize=...)`) — evita drift entre los dos. |
 | 2026-05-22 (Ciclo 5.12) | `docs/DECISIONS.md` como indice navegable por ciclo + tema | AGENTS.md sec 9 ya tiene >820 lineas; un jurado/medico/futuro agente no deberia tener que leerlo todo para encontrar el "por que" de una decision. DECISIONS.md es una vista curada en 3 ejes (por ciclo, por tema clinico, por tema arquitectonico) + seccion de known issues. AGENTS.md sec 9 sigue como source-of-truth completa; DECISIONS.md es vista resumida con links. Cada cierre de ciclo añade entradas a ambos. |
 | 2026-05-22 (Ciclo 5.12) | `FileNotFoundError /tmp/gradio/*.jpg` esporadico catalogado como known upstream issue (sin patch) | El error en logs ocurre en `gradio.Image.preprocess()` (preprocessing de Gradio) ANTES de invocar nuestro callback `predict()`. No se puede atrapar con try/except en Python porque el stack trace nunca llega a nuestro codigo. Causas conocidas en HF Spaces: cold start purga /tmp, Gradio cleanup periodico, doble-click rapido en Analyze. Es esporadico, no afecta a la mayoria de sesiones; mitigacion natural es refresh del browser + re-upload. Si la frecuencia sube en produccion, opciones futuras: upgrade de Gradio (riesgo de regresion gradio-client bug del Ciclo 4.10) o pre-copiar uploads en `input_image.upload` handler. Documentado en DECISIONS.md sec "Known issues". |
+| 2026-05-22 (Ciclo 6.0) | Fix README placeholders `<usuario>` → `ElvLandau` (20 reemplazos en README + HF_SPACES_SETUP) | Pre-sustentacion audit detectó que el README tenia 8 ocurrencias del placeholder con la nota "por completar tras crear el Space" — un jurado leyendolo concluiria que la app NO esta desplegada (cuando lleva semanas RUNNING). Bug latente desde Ciclo 4 que NUNCA se cerro. Sed global + audit post-fix con grep vacio + 22 menciones nuevas de `ElvLandau/spine-segmentation`. URL pública visible en la primera tabla del README. |
+| 2026-05-22 (Ciclo 6.0) | Crear `modelos/` y `datos/` con README explicativo en lugar de subir pesos/data al repo | La rubrica Coursera/U. Andes exige 3 carpetas raiz: `notebooks/`, `modelos/`, `datos/`. Las dos ultimas estaban ausentes. Decision: NO subir los pesos (226 MB de .pth, viven en HF Hub desde Ciclo 4) ni el dataset (propiedad U. Andes, no redistribuible). En su lugar, READMEs de ~70 lineas cada uno que explican DONDE viven los artifacts reales + como obtenerlos. Satisface la letra de la rubrica + da contexto al evaluador en 30 seg de lectura. |
+| 2026-05-22 (Ciclo 6.0) | Commitear notebook alternativo del equipo como `02b_training_alternativo_unet_keras.ipynb` (4.8 MB) | Julian (companero) desarrollo un pipeline en Keras/TensorFlow + Colab paralelo al pipeline PyTorch + SMP de Elvis. Es trabajo del equipo y aporta valor comparativo (sus metricas Dice 0.88 binario coinciden con el paper IEEE). Convencion de nombre: `0Nb_*.ipynb` marca "variante de 0N" — el principal `02_training_experiments.ipynb` (PyTorch, 5 modelos) sigue siendo el que alimenta el deploy. Cero etiquetado por persona (decision de Elvis: presentar como trabajo equipo). Tamano 4.8 MB aceptado as-is; si el repo se siente lento en post-mortem, nbstripout reduce ~80%. |
+| 2026-05-22 (Ciclo 6.0) | `docs/SUSTENTACION_GUIA.md` como artefacto operativo para la defensa oral | Mas valioso del ciclo. Documento de ~476 lineas en 12 secciones que une informe IEEE + repo + deploy: resumen ejecutivo, equipo, mapping rubrica/paper/app, **metricas explicadas (CRITICO para Q&A sobre el gap Dice binario 0.88 vs multiclass 0.34)**, demo paso-a-paso para 5 min de pantalla compartida, narrativa 10 min con timing, 10 Q&A anticipadas con respuestas concretas, cheat sheet de numeros, plan B si algo falla en vivo. Elvis lo abre en el browser mientras presenta y sigue punto por punto. Markdown (no PDF) para editar last-minute si surge feedback en el dry-run. |
