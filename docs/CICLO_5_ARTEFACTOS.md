@@ -16,6 +16,7 @@
 > **Addendum 5.9** (2026-05-20): imagen fija de referencia clínica bilingüe en Explainability. Ver sección 19.
 > **Addendum 5.10** (2026-05-20): fix de convención de lateralidad (anatomía del paciente) + sample S_200. Ver sección 20.
 > **Addendum 5.11** (2026-05-20): fix de arrows del reference image (sample-invariant). Ver sección 21.
+> **Addendum 5.12** (2026-05-22): fix coord centering (aspect='equal') + DECISIONS.md + Gradio FileNotFound known-issue. Ver sección 22.
 
 ---
 
@@ -1521,3 +1522,177 @@ Vía `gradio_client` + curl al endpoint del Space:
   algún momento se cambia la `figsize` (actualmente `(11.26, 7.16)`)
   los tests siguen funcionando porque sólo verifican la fórmula
   matemática del converter, no la apariencia final del PNG.
+
+---
+
+## 22. Addendum 5.12 — Fix coord centering (aspect='equal') + DECISIONS.md
+
+> **Fecha:** 2026-05-22.
+> **Motivación:** Tras desplegar el Ciclo 5.11 (anchors derivados del
+> spine bbox), Elvis verificó visualmente el reference image en el
+> Space y reportó: **las flechas SIGUEN apuntando mal** — aterrizan
+> ~50-60 px ARRIBA de los blobs. Diagnóstico: mi propio fix del Ciclo
+> 5.11 tenía un bug latente sutil sobre cómo matplotlib renderiza
+> imágenes con `aspect='equal'` dentro de axes no-cuadradas en inches.
+>
+> Adicionalmente: Elvis pidió crear un archivo de tipo `decision.md`
+> para mejor trazabilidad de los ciclos de mejora continua.
+
+### Diagnóstico riguroso (verificado matemáticamente)
+
+`AX_CAM_RECT = (0.21, 0.30, 0.26, 0.58)` → en inches:
+- left × fig_w = 0.21 × 11.26 = **2.365** in
+- bottom × fig_h = 0.30 × 7.16 = **2.148** in
+- width × fig_w = 0.26 × 11.26 = **2.928** in (ancho real)
+- height × fig_h = 0.58 × 7.16 = **4.153** in (alto real)
+
+El ax rect es **taller que wide** (2.928 × 4.153). Imagen 512×512 con
+`aspect='equal'`:
+- Se renderiza al MENOR de los dos lados → **2.928 × 2.928 in cuadrada**.
+- Por default `anchor='C'` matplotlib la centra dentro del ax rect.
+- Margen vertical = (4.153 − 2.928) / 2 = **0.6125 in = 61.25 px**
+  arriba y abajo.
+
+El imshow REAL ocupa: `(0.21, 0.3855, 0.26, 0.4089)` en figure
+fraction. NO la ax rect completa `(0.21, 0.30, 0.26, 0.58)` que asume
+el converter del Ciclo 5.11.
+
+Para `anchors["blob_top"]` = pixel (262, 20) en S_200:
+- Ciclo 5.11 (buggy): fy = 0.30 + ((512-20)/512)·0.58 = **0.8573**
+- Ciclo 5.12 (fixed): fy = 0.3855 + ((512-20)/512)·0.4089 = **0.7785**
+- Δ = 0.0788 figure fraction = **56.4 px** hacia arriba (Y desfasada
+  hacia "arriba" en pixel coords de la imagen final).
+
+Eso es exactamente lo que veía Elvis: las flechas aterrizaban ~56 px
+ARRIBA de los blobs.
+
+### Cambios
+
+| Fix | Archivo | Detalle |
+|---|---|---|
+| **AA** Centering math | [`scripts/generate_explain_reference.py`](../scripts/generate_explain_reference.py) | Nuevo `_imshow_bbox_in_figure(ax_rect, fig_size_in, img_aspect=1.0)` retorna el rect REAL que ocupa el imshow dentro del ax_rect. Branches: width-limited (taller-than-wide rect, centered vertically) vs height-limited (wider-than-tall rect, centered horizontally). |
+| **AB** Converter delega | misma | `_pixel_to_figure_coords` llama a `_imshow_bbox_in_figure` para obtener el rect real, luego aplica el mapping lineal estándar (figure y flipped). |
+| **AC** FIG_SIZE_IN constante | misma | Nueva constante `FIG_SIZE_IN = (11.26, 7.16)` a tope del módulo. Usada tanto por `_imshow_bbox_in_figure` como por `plt.figure(figsize=FIG_SIZE_IN, ...)`. Evita drift entre el converter y el figure size si en el futuro se cambia el tamaño. |
+
+### Sub-tarea paralela B — `docs/DECISIONS.md` (índice navegable)
+
+AGENTS.md sec 9 (Historial de Decisiones) crecio a >820 lineas. Un
+jurado, médico colaborador o futuro agente NO debería tener que leer
+todo el AGENTS.md para encontrar el "por qué" de una decisión.
+
+Nuevo archivo [`docs/DECISIONS.md`](DECISIONS.md):
+- **Por ciclo**: tabla resumen, una fila por ciclo (1-2 a 5.12), con
+  la decisión clave de cada uno.
+- **Por tema clínico**: lateralidad, Cobb severity, multi-curva,
+  coverage, rotación, explicabilidad. Cada tema linkea al ciclo que
+  lo decidió.
+- **Por tema arquitectónico**: hosting, deploy mechanism, tests, i18n,
+  reference image generator.
+- **Known issues / known limitations**: incluye el FileNotFoundError
+  de Gradio (decisión Ciclo 5.12: doc-only, no patch).
+
+AGENTS.md sec 9 sigue siendo la **source of truth completa**; DECISIONS.md
+es **vista curada con links**. Cada cierre de ciclo añade entradas a
+ambos.
+
+### Sub-tarea paralela C — `FileNotFoundError /tmp/gradio/*.jpg`
+
+Reportado por Elvis en los logs del Space tras el deploy del 5.11:
+
+```
+FileNotFoundError: [Errno 2] No such file or directory:
+  '/tmp/gradio/9d456c07.../S_200.jpg'
+```
+
+**Decisión**: documentar como known upstream issue, sin patch.
+
+Razón: el crash ocurre en `gradio.Image.preprocess()` ANTES de invocar
+nuestro callback `predict()`. El stack trace nunca llega a nuestro
+código. Causas (todas upstream):
+- Cold start / worker restart purga `/tmp` en HF Spaces.
+- Gradio cleanup periódico de archivos viejos en `/tmp/gradio/`.
+- Doble-click rápido en Analyze (race condition con cleanup interno).
+
+Es esporádico, no afecta a la mayoría de usuarios, y la mitigación
+natural es refresh del browser + re-upload. Si la frecuencia sube en
+producción, opciones futuras:
+1. Upgrade de Gradio (riesgo: la 5.50.0 fue elegida específicamente
+   para el fix de `gradio-client api_info` del Ciclo 4.10).
+2. Pre-copiar el upload a una ubicación persistente en el handler de
+   `input_image.upload`.
+
+Documentado en AGENTS.md sec 9 + DECISIONS.md sec "Known issues".
+
+### Tests añadidos / actualizados (Ciclo 5.12)
+
+1. **Renamed + strengthened**: `test_pixel_to_figure_coords_handles_corners`
+   → `test_pixel_to_figure_coords_accounts_for_aspect_equal_centering`.
+   Los asserts para image (0, 0) cambian: ahora `fy ~0.7944` (top del
+   image rect REAL, no del ax rect en `fy=0.88`). El error message
+   explícito llama al ~0.085 offset como la firma del bug pre-5.12.
+2. **Nuevo**: `test_imshow_bbox_centers_square_in_tall_rect`. Ejercita
+   ambas ramas del helper:
+   - Width-limited: AX_CAM_RECT (taller que wide) → image fits width,
+     centered vertically.
+   - Height-limited: rect sintético wider-than-tall → image fits height,
+     centered horizontally.
+3. **Midpoint preservado**: el assert para (256, 256) → (0.34, 0.59)
+   queda igual pre/post-5.12. El centering simétrico preserva el
+   midpoint, así que es un sanity check rápido.
+
+Suite final: **66 passed + 1 skipped** (era 65 + 1; +1 test nuevo,
+1 test existente renombrado/strengthened).
+
+### Smoke remoto
+
+Vía `gradio_client` + curl:
+
+| Test | Resultado |
+|---|---|
+| `runtime.stage` post-rebuild | `RUNNING` ✓ |
+| Reference image servida (~189 KB ES, ~185 KB EN, mismo size que 5.11 — sólo cambian las posiciones internas de los anchors) | ✓ |
+| Toggle ES↔EN sigue funcional | ✓ |
+| Validación visual de Elvis: 5 flechas → blobs / spine | ✓ ("aterrizan bien") |
+
+### Commits del Ciclo 5.12
+
+- `0bbf48a` fix(assets): correct coord conversion for aspect='equal' centering
+- `8ca5173` feat(assets): regenerate explainability reference with arrows on target
+- `65c9691` test(assets): cover aspect-equal imshow bbox centering
+- `ba6e278` docs(repo): add DECISIONS.md as navigable index of cycle decisions
+- `<este>` docs(cycle5): close cycle 5.12 — coord conversion fix + decisions index
+
+### Decisiones honestas
+
+- **Patrón de "fix sobre fix sobre fix"**: el Ciclo 5.9 introdujo la
+  reference image con S_22; el 5.10 cambió a S_200 (exposo el primer
+  hardcoding); el 5.11 derivó anchors del bbox (expuso un segundo
+  bug sutil de centering); el 5.12 lo arregla definitivamente. El
+  patrón es OK porque cada ciclo es un commit atómico verificado y
+  documentado — pero deja una lección: **cuando un fix introduce
+  abstracción nueva, también introducir tests visuales o
+  matemáticamente derivados ANTES de regenerar y deployar.** Si el
+  test del Ciclo 5.11 hubiera verificado contra los pixel anchors
+  reales del PNG, el bug se habría visto local.
+- **No bumpear FIG_SIZE_IN ni los AX_*_RECT**: los rects actuales son
+  correctos para el layout aspirado (callouts en márgenes laterales).
+  Sólo el converter estaba mal. Resistí la tentación de "arreglar
+  cambiando el layout" porque cosmética != fix del bug.
+- **DECISIONS.md como "vista curada", NO duplicación**: AGENTS.md sec
+  9 sigue siendo la fuente. Si en el futuro divergen, AGENTS.md gana.
+
+### Limitaciones honestas
+
+- **Validación visual final NO automatizable**. Los tests verifican la
+  matemática del converter, pero "las flechas se ven bien" requiere
+  ojo humano. El test podría sofisticarse computando el percentile
+  del CAM en la flecha endpoint y verificando que esté alto, pero
+  añade fragilidad por píxel-perfect dependence.
+- **Si el ax rect en el futuro se vuelve más cuadrado** (e.g., width
+  0.40 vs height 0.50, ratios 2.5×3.58 vs 1×1), el centering se
+  reduce y el bug parecería desaparecer. El fix sigue correcto en
+  ambos casos. Pero la cobertura del nuevo test confirma esa
+  invariancia.
+- **El `FileNotFoundError` puede seguir apareciendo en logs** — esto
+  es upstream y no se va a resolver sin un upgrade de Gradio o un
+  workaround complejo. Documentado en DECISIONS.md.

@@ -1,6 +1,6 @@
 # Prompt para el próximo chat — Ciclo 6 (refinamiento del modelo + entrega)
 
-> **Estado al 2026-05-20:** Ciclos 1, 2, 3, 4, 5, 5.1..5.11 ✅ COMPLETOS.
+> **Estado al 2026-05-22:** Ciclos 1, 2, 3, 4, 5, 5.1..5.12 ✅ COMPLETOS.
 > Ciclo 6 NO tiene brief todavía — el primer paso del próximo chat es
 > definirlo y aprobarlo con Elvis antes de implementar.
 
@@ -15,9 +15,11 @@ U. Andes, Coursera).
 ### Onboarding obligatorio (lee primero en este orden)
 
 1. `AGENTS.md` — memoria persistente (sección 5 = estado de los ciclos).
-   Al cierre del Ciclo 5.11, todos los ciclos 1–5.11 están ✅ completos.
+   Al cierre del Ciclo 5.12, todos los ciclos 1–5.12 están ✅ completos.
+   **Atajo para entender decisiones rápido**: `docs/DECISIONS.md` (índice
+   navegable por ciclo + tema, creado en Ciclo 5.12).
 2. `WORKFLOW.md` — reglas no negociables del repo.
-3. `docs/CICLO_5_ARTEFACTOS.md` — qué se entregó en Ciclos 5 + 5.1..5.11.
+3. `docs/CICLO_5_ARTEFACTOS.md` — qué se entregó en Ciclos 5 + 5.1..5.12.
    La **sección 20** describe el último cambio cerrado (fix de convención
    de lateralidad clínica + sample S_200 en la reference image). La
    **sección 19** describe el cambio inmediato anterior (imagen fija de
@@ -25,13 +27,14 @@ U. Andes, Coursera).
 4. `docs/CICLO_4_ARTEFACTOS.md` — qué se entregó en el Ciclo 4 (despliegue).
 5. `README.md` — visión general + URL pública del Space.
 
-### Estado actual (al cierre del Ciclo 5.11)
+### Estado actual (al cierre del Ciclo 5.12 — 2026-05-22)
 
 ✅ App pública: `https://huggingface.co/spaces/ElvLandau/spine-segmentation`.
 ✅ Toggle ES/EN funcional (default Español) — header markdown +
    explainability markdown + diagnosis report + **reference image
    bilingüe (Ciclo 5.9, base S_200 desde 5.10, arrows derivados del
-   spine bbox desde 5.11)** son todos sensibles al toggle.
+   spine bbox desde 5.11, coord centering corregido en 5.12)** son
+   todos sensibles al toggle.
 ✅ Pestaña Cobb Angle: detección multi-curva, viz tipo Fig 1 Shi et al.,
    slider de rotación con live preview + 5 botones rápidos. **Convexity
    en convención clínica (anatomía del paciente, no perspectiva del
@@ -95,7 +98,7 @@ del Ciclo 5 (en orden tentativo de valor clínico vs esfuerzo):
 - **NO** `git push hf` para parchar el Space — usar
   `python scripts/upload_to_space.py`.
 - **Siempre pasar `--path-in-repo`** explícito en uploads.
-- Tests locales: `pytest tests/ -v` debe seguir verde (65/66 actual,
+- Tests locales: `pytest tests/ -v` debe seguir verde (66/67 actual,
   esperado +N al cerrar Ciclo 6).
 - Honestidad ante todo: si una idea no funciona, decirlo y planear
   retrabajo en vez de marcar la tarea como completa.

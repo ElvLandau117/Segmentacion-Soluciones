@@ -2,7 +2,9 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-20 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-22 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+>
+> **📋 Indice navegable de decisiones**: [`docs/DECISIONS.md`](docs/DECISIONS.md) (desde Ciclo 5.12).
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -600,6 +602,51 @@ fuera del spine y de los blobs.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 21.
 
+### Ciclo 5.12 ✅ COMPLETO — Fix coord centering (aspect='equal') + DECISIONS.md
+Tras desplegar el Ciclo 5.11, Elvis verifico visualmente el reference
+image en el Space y reporto: las flechas SEGUIAN apuntando mal —
+aterrizaban ~50-60 px ARRIBA de los blobs. Diagnostico riguroso: bug
+en mi propio fix del Ciclo 5.11. `_pixel_to_figure_coords` asumia que
+el imshow llenaba toda la ax_rect, pero matplotlib renderiza una
+imagen 512x512 con `aspect='equal'` como un cuadrado centrado en el
+ax_rect — para AX_CAM_RECT (2.928" wide x 4.153" tall), la imagen se
+renderiza como 2.928 x 2.928 centrada verticalmente, con 0.61" (61 px)
+de margen arriba y abajo. Para pixel (262, 20) la formula vieja daba
+fy=0.8573 cuando el correcto era fy=0.7785 → desfase de 56 px hacia
+arriba, exactamente lo que se veia en la captura.
+
+Tambien aprovechamos el ciclo para 2 mejoras de housekeeping:
+DECISIONS.md como indice navegable, y documentar el `FileNotFoundError
+/tmp/gradio/*.jpg` esporadico como known upstream issue.
+
+- [x] **Fix coord centering** ([scripts/generate_explain_reference.py](scripts/generate_explain_reference.py)):
+      nuevo `_imshow_bbox_in_figure(ax_rect, fig_size_in, img_aspect)`
+      retorna el rect REAL que ocupa el imshow dentro del ax_rect,
+      compensando el centering de matplotlib. `_pixel_to_figure_coords`
+      delega la geometria a ese helper y hace un mapping lineal dentro
+      del bbox real. Nueva constante `FIG_SIZE_IN = (11.26, 7.16)`
+      como source-of-truth (usada por _imshow_bbox_in_figure Y por
+      `plt.figure(figsize=...)`).
+- [x] **2 tests actualizados** (suite: **66 passed + 1 skipped**, era
+      65+1): `test_pixel_to_figure_coords_accounts_for_aspect_equal_centering`
+      (rename + asserts corregidos a los valores post-fix) +
+      `test_imshow_bbox_centers_square_in_tall_rect` (nuevo, cubre
+      ambas ramas width-limited y height-limited del bbox helper).
+- [x] **`docs/DECISIONS.md` creado**: indice navegable por ciclo + por
+      tema clinico + por tema arquitectonico + known issues. AGENTS.md
+      sec 9 sigue como source-of-truth completa.
+- [x] **Known issue documentado**: `FileNotFoundError /tmp/gradio/*.jpg`
+      esporadico catalogado como upstream Gradio issue. Sin patch en
+      este ciclo porque el crash ocurre en preprocessing de Gradio
+      antes de nuestro callback (no atrapable desde Python).
+- [x] Deploy via `scripts/upload_to_space.py` con `--path-in-repo`
+      explicito (solo 2 PNGs).
+- [x] Smoke remoto: PNGs regenerados servidos correctamente. Validacion
+      visual final de Elvis: "las 5 flechas aterrizan EN los blobs,
+      no encima."
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 22.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -817,3 +864,6 @@ Orden corto:
 | 2026-05-20 (Ciclo 5.10) | Convencion de lateralidad en `_curve_direction` = anatomia del paciente (NO perspectiva del viewer) | Las radiografias AP siguen la regla del espejo: el lado derecho del paciente aparece en el lado izquierdo de la imagen para quien la mira. Los informes radiologicos SIEMPRE describen lateralidad en anatomia del paciente, no en perspectiva del viewer. Nuestra app reportaba la convexidad en perspectiva del viewer — caso S_158 de la MaIA (anatomicamente right-convex) salia como "convexidad izquierda", confuso para el medico. Fix: swap del ternario en `cobb_angle.py:73` (right ↔ left). Cambio contained: i18n/app/viz no requieren tocarse, los strings "derecha"/"izquierda" siguen funcionando, solo cambia su significado. Documentado in-code con docstring extenso + regresion test que pinea el mapping post-fix. |
 | 2026-05-20 (Ciclo 5.10) | Sample base de la reference image: S_22 → S_200 | S_22 (Cobb 24.9°, mild) era una eleccion conservadora del 5.9 pero la compañera medica no lo reconocio como caso del dataset porque visualmente la columna se ve casi recta. S_200 muestra una S-curve clinicamente clara, suficiente para ilustrar Grad-CAM y Confidence Map en un caso pedagogicamente representativo sin ser tan extremo que el rendering se vea caricaturesco. Defaults del script bumped a S_200 para que cualquier re-generacion futura use el mismo caso "oficial". |
 | 2026-05-20 (Ciclo 5.11) | Posiciones de blobs y arrows del reference image DERIVADAS del spine bbox, no hardcoded | El Ciclo 5.10 expuso un bug latente: tras cambiar de S_22 a S_200, las 5 flechas del reference image apuntaban a espacios vacios y los blobs sinteticos colisionaban con el spine real. Causa: `_simulate_gradcam` tenia los 4 `gaussian_blob` con cx/cy hardcoded para S_22 (cx=240, cy=70 para top, etc.), y `_build_figure` tenia los 5 `arrow_xy` hardcoded en figure-fraction calibrados para S_22 (spine centrado). Fix de raiz: 2 helpers nuevos `_derive_visual_anchors(mask)` y `_pixel_to_figure_coords(px, py, ax_rect)` hacen que TODO se derive del bounding box del spine. Asi el script es ahora invariante al sample base — cualquier radiografia que se cargue tendra blobs OFF-spine y arrows que aterrizan en algo visible. Constantes `AX_CAM_RECT` / `AX_CONF_RECT` a tope del modulo evitan drift entre las 3 funciones que necesitan saber donde estan los paneles. |
+| 2026-05-22 (Ciclo 5.12) | `_pixel_to_figure_coords` debe compensar el centering de `aspect='equal'` cuando ax_rect no es cuadrada en inches | Mi propio fix del Ciclo 5.11 tenia un bug latente: asumi que el imshow llenaba toda la ax_rect, pero matplotlib renderiza un imagen 512x512 con `aspect='equal'` como un cuadrado centrado dentro del rect (anchor='C' default). Para AX_CAM_RECT (2.928 in wide x 4.153 in tall), la imagen sale 2.928 x 2.928 con 0.61 in (61 px) de margen arriba y abajo. Resultado: las flechas aterrizaban ~56 px ARRIBA de los blobs. Fix: nuevo `_imshow_bbox_in_figure(ax_rect, fig_size_in, img_aspect)` computa el rect real del imshow; `_pixel_to_figure_coords` delega ahi y hace un mapping lineal dentro del bbox real. Constante `FIG_SIZE_IN = (11.26, 7.16)` a tope del modulo es source-of-truth (usada tanto por el bbox helper como por `plt.figure(figsize=...)`) — evita drift entre los dos. |
+| 2026-05-22 (Ciclo 5.12) | `docs/DECISIONS.md` como indice navegable por ciclo + tema | AGENTS.md sec 9 ya tiene >820 lineas; un jurado/medico/futuro agente no deberia tener que leerlo todo para encontrar el "por que" de una decision. DECISIONS.md es una vista curada en 3 ejes (por ciclo, por tema clinico, por tema arquitectonico) + seccion de known issues. AGENTS.md sec 9 sigue como source-of-truth completa; DECISIONS.md es vista resumida con links. Cada cierre de ciclo añade entradas a ambos. |
+| 2026-05-22 (Ciclo 5.12) | `FileNotFoundError /tmp/gradio/*.jpg` esporadico catalogado como known upstream issue (sin patch) | El error en logs ocurre en `gradio.Image.preprocess()` (preprocessing de Gradio) ANTES de invocar nuestro callback `predict()`. No se puede atrapar con try/except en Python porque el stack trace nunca llega a nuestro codigo. Causas conocidas en HF Spaces: cold start purga /tmp, Gradio cleanup periodico, doble-click rapido en Analyze. Es esporadico, no afecta a la mayoria de sesiones; mitigacion natural es refresh del browser + re-upload. Si la frecuencia sube en produccion, opciones futuras: upgrade de Gradio (riesgo de regresion gradio-client bug del Ciclo 4.10) o pre-copiar uploads en `input_image.upload` handler. Documentado en DECISIONS.md sec "Known issues". |
