@@ -15,6 +15,7 @@
 > **Addendum 5.8** (2026-05-20): polish del tab Explainability. Ver sección 18.
 > **Addendum 5.9** (2026-05-20): imagen fija de referencia clínica bilingüe en Explainability. Ver sección 19.
 > **Addendum 5.10** (2026-05-20): fix de convención de lateralidad (anatomía del paciente) + sample S_200. Ver sección 20.
+> **Addendum 5.11** (2026-05-20): fix de arrows del reference image (sample-invariant). Ver sección 21.
 
 ---
 
@@ -1405,3 +1406,118 @@ api_name='/predict')`:
   Un test end-to-end con S_158 cargado a la pipeline real requeriría
   los `.pth` checkpoints (gated por `requires_checkpoints`). El smoke
   remoto contra el Space deployed cumple ese rol en producción.
+
+---
+
+## 21. Addendum 5.11 — Fix de arrows del reference image (sample-invariant)
+
+> **Fecha:** 2026-05-20.
+> **Motivación:** Tras desplegar el Ciclo 5.10 (sample base S_22 →
+> S_200), Elvis abrió el Space y reportó: las 5 flechas del reference
+> image apuntan a **espacios vacíos** — "ese ejemplo no señala nada,
+> apunta a cosas que no tienen sentido". El issue no es el sample S_200
+> en sí (esa fue una buena elección clínica del 5.10) sino que el script
+> generador tenía un acoplamiento latente al layout específico de S_22.
+
+### Diagnóstico
+
+Dos hardcodings que se rompieron al cambiar de sample:
+
+1. **`_simulate_gradcam`**: los 4 `gaussian_blob` tenían `(cx, cy)`
+   hardcoded:
+   - `(240, 70)` top-of-head (calibrado para spine de S_22 centrado en x~250)
+   - `(120, 350)` left flank
+   - `(235, 470)` pelvis hotspot
+   - `(420, 420)` right artifact
+
+   En S_200 el spine ocupa x∈[231, 298], y∈[34, 368]. El blob `(235, 470)`
+   sigue debajo del spine (OK por casualidad) pero `(240, 70)` y los
+   demás colisionan con el spine real o quedan a la deriva.
+
+2. **`_build_figure`**: las 5 `arrow_xy` en figure-fraction estaban
+   también calibradas para S_22:
+   - Callout #1 → `(0.30, 0.83)` = pixel `(177, 44)` — LEFT y ABOVE del
+     spine de S_200 → zona negra
+   - Callout #2 → `(0.32, 0.55)` = pixel `(217, 291)` — LEFT del
+     centroide del spine de S_200 (262)
+   - Callout #3 → `(0.31, 0.36)` = pixel `(197, 459)` — debajo del
+     spine pero sin ningún blob ahí
+   - Callouts #4, #5 → razonables por suerte
+
+### Cambios (fix de raíz: derivar todo del bbox del spine)
+
+| Fix | Archivo | Detalle |
+|---|---|---|
+| **Y** Helpers nuevos | [`scripts/generate_explain_reference.py`](../scripts/generate_explain_reference.py) | `_derive_visual_anchors(spine_mask) → dict` retorna spine bbox + centroide + 4 blob anchors (top, pelvis, left, right) DERIVADOS del bbox para que estén SIEMPRE fuera del spine. `_pixel_to_figure_coords(px, py, ax_rect) → (fx, fy)` convierte pixel del imshow 512×512 a coord figure fraction (con y-flip de matplotlib). Constantes `AX_CAM_RECT` y `AX_CONF_RECT` a tope del módulo. |
+| **Z** Apply derived coords | misma | `_simulate_gradcam(mask, anchors)`: los 4 `gaussian_blob` usan `anchors["blob_*"]`. `_build_figure(cam, conf, strings, anchors)`: las 5 `arrow_xy` se computan via `_pixel_to_figure_coords` apuntando a centroide (callouts 2, 4), blob_top (1), blob_pelvis (3), bbox edge lateral inferior (5). `generate()` threads anchors. |
+
+Los `box_xy` (posición de los rectángulos de los callouts en los
+márgenes laterales del figure) NO cambian — esos son estéticos y no
+dependen del sample.
+
+### Tests añadidos (Ciclo 5.11)
+
+1. `test_derive_visual_anchors_places_blobs_outside_spine` — Synthetic
+   mask de barra vertical (mimics S_200) → verifica centroide, bbox,
+   y que cada blob anchor cae FUERA del bbox (top arriba, pelvis abajo,
+   left izquierda, right derecha). Cubre también el fallback de
+   empty-mask (no crash).
+2. `test_pixel_to_figure_coords_handles_corners` — Image (0,0) → top
+   del ax rect (figure y flipped), (size, size) → bottom-right, midpoint
+   → midpoint. Tres assertions con tolerancia 1e-6.
+
+Suite final: **65 passed + 1 skipped** (era 63 + 1).
+
+### Smoke remoto
+
+Vía `gradio_client` + curl al endpoint del Space:
+
+| Test | Resultado |
+|---|---|
+| `runtime.stage` post-rebuild | `RUNNING` ✓ |
+| HEAD HTTP 200 | ✓ |
+| 2 PNGs regenerados servidos (~189 KB ES, ~185 KB EN, mayor que ~187/~183 del 5.10) | ✓ |
+| Validación visual de Elvis: 5 flechas → blobs / spine, no al vacío | ✓ |
+
+### Commits del Ciclo 5.11
+
+- `d4358c3` refactor(assets): derive blob + arrow positions from spine bbox
+- `9021def` feat(assets): regenerate explainability reference with corrected arrows
+- `aa9ca15` test(assets): cover anchor derivation and pixel-to-figure conversion
+- `<este>` docs(cycle5): close cycle 5.11 — sample-invariant arrow targets
+
+### Decisiones honestas
+
+- **Mantenemos los `box_xy` de los callouts hardcoded** (en los
+  márgenes laterales del figure). Eso es estético y queremos un layout
+  predecible que no salte entre samples. Lo único derivado son los
+  ANCHORS de las flechas y los blobs sintetizados, no las posiciones
+  de los rectángulos de los callouts.
+- **El callout #5 no tiene un blob asociado** — apunta al borde lateral
+  inferior del spine (zona amarilla del confidence map). La fórmula
+  `edge_y = cy + max(20, h//4)` lo mete en una región donde el confidence
+  empieza a degradarse de verde a amarillo. Calibrada para que se vea
+  natural en cualquier spine, no solo S_200.
+- **No re-entrenamos el sample**: S_200 sigue siendo el sample base
+  oficial (decisión del Ciclo 5.10). Si en el futuro Elvis quiere otro
+  caso, basta `--sample-xray S_xxx.jpg` y el script reacomoda
+  automáticamente blobs + flechas — esa es la propiedad invariante que
+  acabamos de garantizar.
+
+### Limitaciones honestas
+
+- **`_derive_visual_anchors` asume spine vertical centrado-ish.** Si
+  alguien carga un caso con la columna acostada horizontalmente o
+  cropeada raro, los anchors pueden quedar en posiciones extrañas. El
+  fallback de empty-mask cubre el caso degenerado; para una imagen
+  rotada al 90° habría que rotar primero (lo cual es out-of-scope —
+  ese rotar es del UI slider, no del generador de assets).
+- **Los blobs siguen siendo síntesis, no Grad-CAM real.** Pedagógicamente
+  suficiente, pero un médico exigente podría querer una pasada del
+  modelo real sobre el sample. Eso es deferred a Ciclo 6 si se
+  prioriza (significaría cargar los pesos en el generador → más
+  complejidad).
+- **Test de `_pixel_to_figure_coords` usa tolerancia 1e-6** — si en
+  algún momento se cambia la `figsize` (actualmente `(11.26, 7.16)`)
+  los tests siguen funcionando porque sólo verifican la fórmula
+  matemática del converter, no la apariencia final del PNG.

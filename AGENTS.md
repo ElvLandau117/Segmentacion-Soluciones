@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-20 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10 ✅ COMPLETOS. Ciclo 6: pendiente brief.
+> Ultima actualizacion: 2026-05-20 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11 ✅ COMPLETOS. Ciclo 6: pendiente brief.
 >
 > **🚀 URL publica de la app:** https://huggingface.co/spaces/ElvLandau/spine-segmentation
 >
@@ -555,6 +555,51 @@ elegir un caso mas demostrativo (S_200) sube el valor pedagogico.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 20.
 
+### Ciclo 5.11 ✅ COMPLETO — Fix de arrows del reference image (sample-invariant)
+Feedback de Elvis al ver el deployed del Ciclo 5.10: las 5 flechas del
+reference image apuntan a espacios vacios — "ese ejemplo no señala nada,
+apunta a cosas que no tienen sentido". Causa raiz: los 4 hotspots
+simulados (`gaussian_blob` en `_simulate_gradcam`) y los 5 `arrow_xy` de
+los callouts estaban hardcoded para el layout de S_22 (spine centrado,
+parcial). S_200 tiene el spine ligeramente a la derecha y full-height,
+asi que los blobs colisionaban con el spine real y las flechas aterrizaban
+fuera del spine y de los blobs.
+
+- [x] **Refactor del generador** ([scripts/generate_explain_reference.py](scripts/generate_explain_reference.py)):
+      2 helpers nuevos a nivel modulo:
+      `_derive_visual_anchors(spine_mask) -> dict` retorna spine bbox +
+      centroide + 4 blob positions (top, pelvis, left, right) DERIVADAS
+      del bbox del spine, no hardcoded. `_pixel_to_figure_coords(px, py,
+      ax_rect)` convierte pixel del imshow 512x512 a coords figure
+      fraction. Constantes `AX_CAM_RECT` y `AX_CONF_RECT` mantienen el
+      converter y `_build_figure` en sync.
+- [x] **`_simulate_gradcam` acepta `anchors`** y coloca los 4
+      gaussian_blob calls en posiciones derivadas — siempre fuera del
+      spine real.
+- [x] **`_build_figure` acepta `anchors`** y deriva los 5 arrow_xy via
+      `_pixel_to_figure_coords` apuntando al centroide del spine
+      (callouts 2, 4), al blob_top (callout 1), al blob_pelvis (callout
+      3), y al borde lateral inferior del bbox (callout 5).
+- [x] **`generate()` thread-ea anchors** desde
+      `_derive_visual_anchors(mask)` hacia las 2 funciones consumidoras.
+      Cero cambios cosmeticos en las posiciones de los rectangulos de
+      callouts (siguen fijos en los margenes laterales — eso si es
+      estetico, no sample-dependent).
+- [x] 2 tests nuevos (suite: **65 passed + 1 skipped**, era 63+1):
+      `test_derive_visual_anchors_places_blobs_outside_spine` valida
+      bbox + blobs fuera del spine + fallback de empty mask;
+      `test_pixel_to_figure_coords_handles_corners` valida los 4
+      corners + midpoint del converter (figure y flipped).
+- [x] Deploy via `scripts/upload_to_space.py` con `--path-in-repo`
+      explicito (solo los 2 PNGs; el generator vive en el repo, no en
+      el Space).
+- [x] Smoke remoto: PNGs regenerados (~189 KB ES, ~185 KB EN) servidos
+      via `/_on_language_change`. Validacion visual final: Elvis abre
+      Explainability tab y ve que las 5 flechas aterrizan en
+      blobs/spine, ya no en vacio.
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 21.
+
 ### Ciclo 6 (proximo) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
@@ -771,3 +816,4 @@ Orden corto:
 | 2026-05-20 (Ciclo 5.9) | Recreacion programatica del mockup con scripts/generate_explain_reference.py en lugar de copiar el PNG original | El PNG original del medico companero no estaba disponible como path de archivo (solo como adjunto visual al chat). Recrear el panel con matplotlib + cv2 (sample radiograph S_22 + binary mask + simulated jet/RdYlGn overlays + callouts + colorbars) garantiza consistencia ES↔EN al 100%. Trade-off: la version recreada puede no coincidir pixel a pixel con el diseño original. Mitigacion: el script se commitea con `--lang es|en|both` para regenerar al cambiar strings o reemplazar la base. Si Elvis quiere el PNG exacto del medico, basta colocarlo manualmente en assets/ y re-correr el script solo para la traduccion EN. |
 | 2026-05-20 (Ciclo 5.10) | Convencion de lateralidad en `_curve_direction` = anatomia del paciente (NO perspectiva del viewer) | Las radiografias AP siguen la regla del espejo: el lado derecho del paciente aparece en el lado izquierdo de la imagen para quien la mira. Los informes radiologicos SIEMPRE describen lateralidad en anatomia del paciente, no en perspectiva del viewer. Nuestra app reportaba la convexidad en perspectiva del viewer — caso S_158 de la MaIA (anatomicamente right-convex) salia como "convexidad izquierda", confuso para el medico. Fix: swap del ternario en `cobb_angle.py:73` (right ↔ left). Cambio contained: i18n/app/viz no requieren tocarse, los strings "derecha"/"izquierda" siguen funcionando, solo cambia su significado. Documentado in-code con docstring extenso + regresion test que pinea el mapping post-fix. |
 | 2026-05-20 (Ciclo 5.10) | Sample base de la reference image: S_22 → S_200 | S_22 (Cobb 24.9°, mild) era una eleccion conservadora del 5.9 pero la compañera medica no lo reconocio como caso del dataset porque visualmente la columna se ve casi recta. S_200 muestra una S-curve clinicamente clara, suficiente para ilustrar Grad-CAM y Confidence Map en un caso pedagogicamente representativo sin ser tan extremo que el rendering se vea caricaturesco. Defaults del script bumped a S_200 para que cualquier re-generacion futura use el mismo caso "oficial". |
+| 2026-05-20 (Ciclo 5.11) | Posiciones de blobs y arrows del reference image DERIVADAS del spine bbox, no hardcoded | El Ciclo 5.10 expuso un bug latente: tras cambiar de S_22 a S_200, las 5 flechas del reference image apuntaban a espacios vacios y los blobs sinteticos colisionaban con el spine real. Causa: `_simulate_gradcam` tenia los 4 `gaussian_blob` con cx/cy hardcoded para S_22 (cx=240, cy=70 para top, etc.), y `_build_figure` tenia los 5 `arrow_xy` hardcoded en figure-fraction calibrados para S_22 (spine centrado). Fix de raiz: 2 helpers nuevos `_derive_visual_anchors(mask)` y `_pixel_to_figure_coords(px, py, ax_rect)` hacen que TODO se derive del bounding box del spine. Asi el script es ahora invariante al sample base — cualquier radiografia que se cargue tendra blobs OFF-spine y arrows que aterrizan en algo visible. Constantes `AX_CAM_RECT` / `AX_CONF_RECT` a tope del modulo evitan drift entre las 3 funciones que necesitan saber donde estan los paneles. |
