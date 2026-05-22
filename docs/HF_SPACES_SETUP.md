@@ -33,17 +33,17 @@ Antes del Space necesitamos el repo de pesos. Ver
 [`HUGGINGFACE_SETUP.md`](HUGGINGFACE_SETUP.md) para el detalle, en resumen:
 
 ```powershell
-# Reemplaza <usuario> por tu username de HF
+# Reemplaza ElvLandau por tu username de HF
 python scripts/upload_weights.py `
-    --repo <usuario>/spine-checkpoints `
+    --repo ElvLandau/spine-checkpoints `
     --file checkpoints/deeplabv3plus_resnet50_multiclass_best.pth
 
 python scripts/upload_weights.py `
-    --repo <usuario>/spine-checkpoints `
+    --repo ElvLandau/spine-checkpoints `
     --file checkpoints/unet_resnet50_binary_best.pth
 ```
 
-Confirma que aparecen en `https://huggingface.co/<usuario>/spine-checkpoints`.
+Confirma que aparecen en `https://huggingface.co/ElvLandau/spine-checkpoints`.
 
 ## 2. Crear el Space
 
@@ -57,7 +57,7 @@ Confirma que aparecen en `https://huggingface.co/<usuario>/spine-checkpoints`.
    - **Public/Private:** **Public** (para que jurados accedan sin login).
 3. Click **Create Space**.
 
-Se crea un repo git vacío en `https://huggingface.co/spaces/<usuario>/spine-segmentation`.
+Se crea un repo git vacío en `https://huggingface.co/spaces/ElvLandau/spine-segmentation`.
 
 ## 3. Configurar variables y secrets del Space
 
@@ -66,7 +66,7 @@ El Space necesita saber dónde están los pesos. En la página del Space:
 1. Click en **Settings** (arriba a la derecha).
 2. Sección **Variables and secrets** → **New variable**:
    - Name: `HF_REPO_ID`
-   - Value: `<usuario>/spine-checkpoints`
+   - Value: `ElvLandau/spine-checkpoints`
 3. Si el repo de pesos es **privado** (no recomendado para este proyecto),
    añadir también un **secret**:
    - Name: `HF_TOKEN`
@@ -84,7 +84,7 @@ Hay 2 caminos. El más simple para empezar:
 
 ```bash
 # En tu clon local del repo de GitHub:
-git remote add hf https://huggingface.co/spaces/<usuario>/spine-segmentation
+git remote add hf https://huggingface.co/spaces/ElvLandau/spine-segmentation
 git push hf main
 ```
 
@@ -107,7 +107,7 @@ Para el alcance del Ciclo 4, **camino A es suficiente**.
 
 ## 5. Primer arranque
 
-1. Abrir https://huggingface.co/spaces/<usuario>/spine-segmentation
+1. Abrir https://huggingface.co/spaces/ElvLandau/spine-segmentation
 2. Ver la pestaña **Logs** del Space: debería verse el build pip + la descarga
    de pesos (`[weights] Downloading deeplabv3plus_resnet50_multiclass_best.pth ...`).
 3. Cuando aparece `Running on local URL: http://0.0.0.0:7860`, la app está lista.
@@ -136,7 +136,7 @@ Para el alcance del Ciclo 4, **camino A es suficiente**.
 | Ver logs en vivo | Settings → Logs (o la pestaña "Logs" en la página principal) |
 | Reiniciar el Space | Settings → Factory reboot |
 | Actualizar el código | `git push hf main` (build automático) |
-| Actualizar un peso | Subir nuevo `.pth` a `<usuario>/spine-checkpoints` con `scripts/upload_weights.py` + Factory reboot del Space (re-descarga el nuevo) |
+| Actualizar un peso | Subir nuevo `.pth` a `ElvLandau/spine-checkpoints` con `scripts/upload_weights.py` + Factory reboot del Space (re-descarga el nuevo) |
 | Cambiar `HF_REPO_ID` (apuntar a otro repo de pesos) | Settings → Variables → editar → Factory reboot |
 | Cambiar visibilidad (Public ↔ Private) | Settings → Visibility |
 | Upgradear hardware (si la inferencia es muy lenta) | Settings → Hardware → CPU Upgrade (~$9/mes) o GPU T4 (~$0.6/h) |
@@ -159,10 +159,10 @@ Para el alcance del Ciclo 4, **camino A es suficiente**.
 
 > Esta sección se completa después del primer deploy real.
 
-- **URL del Space:** `https://huggingface.co/spaces/<usuario>/spine-segmentation`
-- **Owner:** `<usuario>`
+- **URL del Space:** `https://huggingface.co/spaces/ElvLandau/spine-segmentation`
+- **Owner:** `ElvLandau`
 - **Hardware:** CPU Basic (free)
-- **Repo de pesos vinculado:** `<usuario>/spine-checkpoints`
+- **Repo de pesos vinculado:** `ElvLandau/spine-checkpoints`
 - **Fecha primer deploy:** _por completar_
 - **Latencia media de inferencia:** _por completar_ s
 - **Tamaño del entorno construido:** _por completar_ MB

@@ -32,9 +32,9 @@ apoyo al radiólogo, no como reemplazo.
 
 | Recurso | URL |
 |---------|-----|
-| **App desplegada (oficial)** | `https://huggingface.co/spaces/<usuario>/spine-segmentation` — _por completar tras crear el Space; ver [`docs/HF_SPACES_SETUP.md`](docs/HF_SPACES_SETUP.md)_ |
+| **App desplegada (oficial)** | `https://huggingface.co/spaces/ElvLandau/spine-segmentation` — _por completar tras crear el Space; ver [`docs/HF_SPACES_SETUP.md`](docs/HF_SPACES_SETUP.md)_ |
 | **Repositorio GitHub** | https://github.com/ElvLandau117/Segmentacion-Soluciones |
-| **Pesos del modelo** | `https://huggingface.co/<usuario>/spine-checkpoints` — ver [`docs/HUGGINGFACE_SETUP.md`](docs/HUGGINGFACE_SETUP.md) |
+| **Pesos del modelo** | `https://huggingface.co/ElvLandau/spine-checkpoints` — ver [`docs/HUGGINGFACE_SETUP.md`](docs/HUGGINGFACE_SETUP.md) |
 | **Dataset** | MaIA Scoliosis (propiedad U. Andes — solicitarlo al líder del proyecto) |
 | **Rúbrica oficial** | [`requisitos_universidad/`](requisitos_universidad/) |
 | **Memoria del proyecto** | [`AGENTS.md`](AGENTS.md) |
@@ -77,14 +77,14 @@ Todo corre en CPU (no requiere GPU para inferencia) y se despliega como un
 USUARIO (medico, jurado, compañero)
    │ HTTPS gestionado por HF
    ▼
-huggingface.co/spaces/<usuario>/spine-segmentation
+huggingface.co/spaces/ElvLandau/spine-segmentation
    │ runtime: Gradio SDK, CPU Basic gratis (2 vCPU, 16 GB RAM)
    │ entrypoint: app.py (expone `demo`)
    ▼
 APP (Gradio + DeepLabV3+ + UNet binario)
    │ boot: ensure_weights() -> snapshot_download desde HF Hub
    ▼
-huggingface.co/<usuario>/spine-checkpoints    ← repo de pesos (mismo HF)
+huggingface.co/ElvLandau/spine-checkpoints    ← repo de pesos (mismo HF)
 ```
 
 - **Modelo en producción:** `DeepLabV3+ ResNet50` (ganador del Ciclo 3 con
@@ -92,7 +92,7 @@ huggingface.co/<usuario>/spine-checkpoints    ← repo de pesos (mismo HF)
 - **Pesos:** repo separado en HF Hub. Se descargan al primer arranque del
   Space y se cachean en su storage persistente (50 GB gratis).
 - **HTTPS:** automático y transparente, gestionado por HF.
-- **URL:** `https://huggingface.co/spaces/<usuario>/spine-segmentation`.
+- **URL:** `https://huggingface.co/spaces/ElvLandau/spine-segmentation`.
 - **Sleep:** tras 48 h sin uso el Space se duerme; despierta en 30-60 s al
   primer click. Para evaluación: abrir la URL 1 minuto antes para calentarlo.
 
@@ -182,14 +182,14 @@ python scripts/upload_weights.py --file checkpoints/unet_resnet50_binary_best.pt
 # 3. Crear el Space en https://huggingface.co/new-space
 #    SDK: Gradio  |  Hardware: CPU Basic (free)
 # 4. Push del codigo al Space:
-git remote add hf https://huggingface.co/spaces/<usuario>/spine-segmentation
+git remote add hf https://huggingface.co/spaces/ElvLandau/spine-segmentation
 git push hf main
 
-# 5. En Settings del Space -> Variables: setear HF_REPO_ID=<usuario>/spine-checkpoints
+# 5. En Settings del Space -> Variables: setear HF_REPO_ID=ElvLandau/spine-checkpoints
 ```
 
 HF construye el Space, descarga los pesos y la URL queda en
-`https://huggingface.co/spaces/<usuario>/spine-segmentation`.
+`https://huggingface.co/spaces/ElvLandau/spine-segmentation`.
 
 Runbook detallado paso a paso: [`docs/HF_SPACES_SETUP.md`](docs/HF_SPACES_SETUP.md).
 Cualquier evaluador puede **duplicar el Space en 1 click** ("Duplicate Space" en
