@@ -2,7 +2,7 @@
 
 > **Spec-Driven Work (Pilar 6):** Artefacto persistente del proyecto.
 > Cada ciclo lo actualiza. Todo nuevo chat/agente DEBE leerlo primero.
-> Ultima actualizacion: 2026-05-22 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12, 6.0, 6.1 ✅ COMPLETOS. Ciclo 6.2+ : pendiente.
+> Ultima actualizacion: 2026-05-22 | Ciclos: 1, 2, 3, 4, 5, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12, 6.0, 6.1, 6.2 ✅ COMPLETOS. Ciclo 6.3+ : pendiente (candidato principal: bug `T6-T5` en `assign_vertebra_names_to_curves`).
 >
 > **📋 Indice navegable de decisiones**: [`docs/DECISIONS.md`](docs/DECISIONS.md) (desde Ciclo 5.12).
 > **🎤 Guia de sustentacion**: [`docs/SUSTENTACION_GUIA.md`](docs/SUSTENTACION_GUIA.md) (Ciclo 6.0).
@@ -762,14 +762,54 @@ Cambios:
 
 Conocido pendiente (no parte del 6.1, decision de Elvis):
 
-- [ ] **Ciclo 6.2 candidato**: bug separado en
-      `assign_vertebra_names_to_curves` que reporta `T6-T5` como
-      secundaria (upper > lower, anatomicamente raro). Vive en otra
-      funcion. Documentado como known issue.
+- [ ] **Ciclo 6.3 candidato** (era 6.2 antes del UX cycle): bug
+      separado en `assign_vertebra_names_to_curves` que reporta
+      `T6-T5` como secundaria (upper > lower, anatomicamente raro).
+      Vive en otra funcion. Documentado como known issue.
 
 Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 23.
 
-### Ciclo 6.2+ (post-sustentacion) — Refinamiento del modelo + entrega final
+### Ciclo 6.2 ✅ COMPLETO — Instrucciones de uso en la UI + i18n del slider
+Post-Ciclo 6.1 (mismo dia 2026-05-22): Elvis pidio agregar instrucciones
+mas intuitivas para el usuario primerizo de la app. El feedback original
+de la medica colaboradora incluia confusion sobre "que hacer si la
+radiografia vino mal posicionada" — la app tenia el slider de rotacion
+desde el Ciclo 5.5 pero sin texto explicativo, y ningun hint sobre que
+veria en cada tab de salida.
+
+Cambios:
+
+- [x] **Markdown nuevo de instrucciones** entre input image y slider
+      ([`spine_segmentation/deployment/i18n.py`](spine_segmentation/deployment/i18n.py)
+      + [`spine_segmentation/deployment/app.py`](spine_segmentation/deployment/app.py)).
+      Dos parrafos compactos en ES/EN:
+      (1) si la radiografia vino inclinada, usar slider/botones antes de
+          Analyze — el metodo del Cobb asume columna vertical y emitira
+          ROTATION WARNING > 12°;
+      (2) mini-leyenda de que ve en cada tab (Binary = forma global,
+          Vertebrae = vertebras individuales coloreadas, Cobb Angle =
+          angulo + curvas + lateralidad, Explainability = mapas
+          Grad-CAM y de confianza).
+      Patron reutiliza `header_markdown(lang)` / `explain_markdown(lang)`.
+- [x] **i18n del slider de rotacion + boton Reset**, ambos hardcoded en
+      ingles desde el Ciclo 5.5 (known limitation Nivel B). Nuevas
+      claves `rotation_slider_label` y `rotation_reset_button` en
+      `DIAGNOSIS_STRINGS`. El `_on_language_change` handler ahora
+      retorna 6 outputs (era 3): header, explain_md, reference_image,
+      instructions_md, gr.update(label=...) para el slider y
+      gr.update(value=...) para el boton Reset.
+- [x] **2 tests pinneados** en `tests/test_app_smoke.py`:
+      `test_instructions_markdown_renders_in_both_languages` y
+      `test_rotation_slider_label_is_translated`. Suite 75 + 1
+      (era 73 + 1 al cierre del 6.1).
+- [x] **Deploy atomico** via `upload_to_space.py` con `app.py` + `i18n.py`
+      en un solo commit. Smoke remoto sobre S_100 en ES y EN — flujo
+      end-to-end intacto, lateralidad sigue correcta (`derecha +
+      izquierda` post-6.1).
+
+Artefacto: [`docs/CICLO_5_ARTEFACTOS.md`](docs/CICLO_5_ARTEFACTOS.md) sec 24.
+
+### Ciclo 6.3+ (post-sustentacion) — Refinamiento del modelo + entrega final
 - [ ] Mejorar Cobb multiclase (SVD sobre centroides, constraint biomecanico
       post-proc, votacion robusta)
 - [ ] Enmascarar confidence map por la prediccion (idea identificada Ciclo 5)
@@ -997,3 +1037,5 @@ Orden corto:
 | 2026-05-22 (Ciclo 6.1) | Cambio de firma de `_curve_direction` (`dx_dy` -> `x_eval, y_eval`) sin rompimiento externo | El algoritmo nuevo necesita las coordenadas del spline, no solo la primera derivada. La firma cambia de `(dx_dy, ip_a, ip_b)` a `(x_eval, y_eval, ip_a, ip_b, neutral_threshold_px2=50.0)`. Verifique con grep que el unico caller esta en `_cobb_from_binary_single_pass` linea 274 del mismo modulo, donde `x_eval` y `y_eval` ya estan en scope (lineas 221-222). Cambio completamente contained — `i18n.py`, `app.py`, `inference.py`, `visualize.py` no se tocan. Los strings `convex_right`/`convex_left` se reutilizan: solo cambia su significado algoritmico, no su mapping ni su texto. |
 | 2026-05-22 (Ciclo 6.1) | Tests anchored al ground truth oficial de MaIA (`tests/test_cobb_laterality_real.py`) | El Ciclo 5.10 cerro sobre evidencia de 1 caso y no agrego test pinneado contra dataset real — eso fue parte de por que el bug residual paso desapercibido hasta post-sustentacion. Decision: agregar tests que cargan `RadiographMetrics/curves_csv/curve_*.csv` + `metrics_json/metrics_*.json` directamente, calculan `expected_direction = "right" if apex_x < csvl_x else "left"` (regla del espejo en AP), y validan contra `_curve_direction`. Gated por `skipif(not dataset_present)` para no romper CI si el dataset no esta montado. Cobre S_158 (pivot 5.10) y S_22 (caso flagged por el sweep baseline). Solo principal porque el dataset oficial no anota secundarias — secundarias se cubren por el canary sintetico de S-shape. |
 | 2026-05-22 (Ciclo 6.1) | `scripts/sweep_laterality.py` como herramienta reutilizable para futuros ciclos | El sweep visual con tabla MD es la unica forma de captar regresiones cualitativas que pytest no puede ver (e.g., "las dos curvas de una S-shape reportan opposing laterality"). Diseñe el script para que sea reusable: lista de casos parametrizable, paths del dataset y checkpoints overrideable via flags, output a markdown + CSV. Funciona desde cualquier worktree (sys.path insert del repo root) y el resolver del MAIA dataset busca arriba en los ancestors. Se commitea en el worktree del 6.1 pero queda disponible para 6.2+. Outputs van a `outputs/` (gitignored) por tipo de ciclo. |
+| 2026-05-22 (Ciclo 6.2) | Markdown compacto de instrucciones entre input y slider, NO un tab "Instrucciones" separado | Elvis pidio instrucciones intuitivas pero "no muy extensas". Tres opciones discutidas: (a) tab nuevo "Ayuda/Instructions", (b) Accordion colapsable, (c) markdown corto en la columna principal. Elegimos (c) porque: aparece a la vista del usuario PRIMERIZO sin que tenga que clickear nada, queda en el grupo natural input → instrucciones → slider/botones → Analyze (proximidad pedagogica), y no infla la UI. Limitado a 2 parrafos cortos para no empujar el boton Analyze fuera del viewport. Patron copiado de `header_markdown` / `explain_markdown` para coherencia arquitectonica. |
+| 2026-05-22 (Ciclo 6.2) | i18n del slider de rotacion + boton Reset via `gr.update(label=...)` / `gr.update(value=...)` | Eran hardcoded en ingles desde el Ciclo 5.5 — known limitation del Nivel B i18n del Ciclo 5.7 ("Gradio no permite cambiar labels de componentes facilmente sin recrear el Blocks"). En Gradio 5.50.0 (pinned en `requirements.txt` desde el Ciclo 4.10), `gr.update(label=...)` para `gr.Slider` y `gr.update(value=...)` para `gr.Button` SI funcionan en vivo desde un handler de `language_radio.change`. Verifique empiricamente con `create_app()` + smoke remoto. Esto cierra una limitacion conocida del Ciclo 5.7 sin recrear Blocks ni cambiar la version de Gradio. Los demas labels (input image, botones de rotacion rapida +5°/-90°, tabs "Binary"/"Cobb Angle", boton "Analyze") siguen hardcoded en ingles — esos pueden venir en un Ciclo 6.4+ de "i18n Nivel C completo" si Elvis lo prioriza. |

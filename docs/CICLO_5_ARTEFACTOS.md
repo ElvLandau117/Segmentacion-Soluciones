@@ -18,6 +18,7 @@
 > **Addendum 5.11** (2026-05-20): fix de arrows del reference image (sample-invariant). Ver sección 21.
 > **Addendum 5.12** (2026-05-22): fix coord centering (aspect='equal') + DECISIONS.md + Gradio FileNotFound known-issue. Ver sección 22.
 > **Addendum 6.1** (2026-05-22): fix de lateralidad por chord signed-area (post-sustentación). Ver sección 23.
+> **Addendum 6.2** (2026-05-22): instrucciones de uso en la UI + i18n del slider de rotación. Ver sección 24.
 
 ---
 
@@ -1852,11 +1853,109 @@ Suite final: **73 passed + 1 skipped** (era 66 + 1).
   samples del spline). Si Elvis o la médica observan casos
   marcados como `neutral` que clínicamente no deberían serlo,
   ajustar este valor.
-- **Bug separado pendiente — "T6-T5" en secundaria (candidato 6.2)**:
-  la captura Image 2 del feedback de la médica mostraba una curva
-  secundaria reportada como `T6-T5` (upper > lower, anatómicamente
-  raro). Vive en `assign_vertebra_names_to_curves` (orden de upper/
-  lower no se valida), NO en `_curve_direction`. Decisión de Elvis:
-  ciclo 6.2.
+- **Bug separado pendiente — "T6-T5" en secundaria (reagendado a 6.3
+  tras el UX cycle)**: la captura Image 2 del feedback de la médica
+  mostraba una curva secundaria reportada como `T6-T5` (upper > lower,
+  anatómicamente raro). Vive en `assign_vertebra_names_to_curves`
+  (orden de upper/lower no se valida), NO en `_curve_direction`.
 - **No re-entrenamos nada**. El fix es 100% post-procesamiento del
   spline.
+
+---
+
+## 24. Addendum 6.2 — Instrucciones de uso en la UI + i18n del slider
+
+> **Fecha:** 2026-05-22 (mismo día que Ciclo 6.1, después del cierre).
+> **Motivación:** Tras cerrar el bug clínico de lateralidad (6.1),
+> Elvis pidió hacer la app más intuitiva para usuarios primerizos
+> (médicos, jurados, evaluadores). El feedback de la médica del 6.1
+> incluyó confusión sobre qué hacer cuando la radiografía vino mal
+> posicionada — la app tenía el slider de rotación desde el Ciclo
+> 5.5 pero sin texto explicativo, y ningún hint sobre qué iba a ver
+> en cada tab de salida.
+
+### Cambios
+
+| # | Archivo | Detalle |
+|---|---|---|
+| 1 | `spine_segmentation/deployment/i18n.py` | Nuevo dict `INSTRUCTIONS_MARKDOWN` (ES/EN) + helper `instructions_markdown(lang)` siguiendo el patrón existente de `header_markdown` / `explain_markdown`. Dos parrafos compactos: (a) si la radiografía vino inclinada, usar slider/botones antes de Analyze — método del Cobb asume columna vertical, ROTATION WARNING > 12°; (b) leyenda de tabs (Binary, Vertebrae, Cobb Angle, Explainability). |
+| 2 | `spine_segmentation/deployment/i18n.py` | Dos claves nuevas en `DIAGNOSIS_STRINGS["es"]` y `["en"]`: `rotation_slider_label` y `rotation_reset_button` — antes hardcoded en inglés desde el Ciclo 5.5. |
+| 3 | `spine_segmentation/deployment/app.py` | (a) Insertar `gr.Markdown(instructions_markdown(...))` entre el input image y el rotation slider. (b) Cambiar `label` hardcoded del slider por `t("rotation_slider_label", DEFAULT_LANG)`. (c) Cambiar el `value="Reset"` del botón por `t("rotation_reset_button", DEFAULT_LANG)`. (d) Extender `_on_language_change` para retornar 6 outputs (era 3): header, explain, reference image, instructions markdown, slider label vía `gr.update(label=...)`, botón Reset vía `gr.update(value=...)`. |
+
+### ¿Por qué `gr.update(label=...)` funciona ahora?
+
+El Ciclo 5.7 había declarado que "Gradio no permite cambiar labels de
+componentes facilmente sin recrear el Blocks" — esa era la razón de
+la limitación Nivel B del i18n (default Español, EN solo en
+markdowns + diagnosis text). En Gradio 5.50.0 (pinned desde el Ciclo
+4.10), `gr.update(label=...)` para `gr.Slider` y `gr.update(value=...)`
+para `gr.Button` **sí funcionan en vivo** desde un handler de
+`language_radio.change`. Verificado por:
+
+- `python -c "from spine_segmentation.deployment.app import create_app; app = create_app(); print(type(app).__name__)"` → construye OK.
+- Smoke remoto post-deploy: toggle ES → EN en gradio_client predict → el diagnosis text cambia al inglés (canary del handler completo).
+- (Pendiente browser visual: confirmar que el label del slider y el botón Reset también cambian — Elvis valida esto en https://huggingface.co/spaces/ElvLandau/spine-segmentation).
+
+Esto cierra una limitación conocida del Ciclo 5.7 sin recrear Blocks
+ni cambiar la versión de Gradio.
+
+### Tests añadidos
+
+- `test_instructions_markdown_renders_in_both_languages` — valida que
+  ambos idiomas son no-vacíos, distintos, y contienen las palabras
+  clave: `"Analyze"`, `"ROTATION WARNING"`, y los nombres de los 4
+  tabs. Whitespace normalizado para tolerar wraps del markdown.
+- `test_rotation_slider_label_is_translated` — valida que las dos
+  claves nuevas no caen al fallback, que el ES contiene `"horario"` o
+  `"grados"`, y que EN Reset queda como literal `"Reset"`.
+
+Suite final: **75 passed + 1 skipped** (era 73 + 1 al cierre del 6.1).
+
+### Commits del Ciclo 6.2
+
+- `d2a0bc6` feat(i18n): add usage instructions markdown + rotation slider/reset keys
+- `ad966d8` feat(ui): bilingual usage instructions + translate rotation slider/reset label
+- `91bf9b9` test(ui): pin instructions markdown bilingual + slider label translation
+- `<este>` docs(cycle6): close cycle 6.2 — UI instructions + slider i18n
+
+### Smoke remoto
+
+| Verificación | Resultado |
+|---|---|
+| Upload atómico (app.py + i18n.py en 1 commit) | OK |
+| `runtime.stage` post-rebuild | RUNNING |
+| S_100 ES: `principal derecha + secundaria izquierda` (no-regresión Ciclo 6.1) | ✓ |
+| S_100 EN: `principal convex right + secondary convex left` | ✓ |
+
+### Aprendizajes
+
+- **Una limitación documentada como "imposible" merece re-verificación
+  cuando cambia el entorno.** El Ciclo 5.7 declaró que los labels no
+  podían retraducirse en vivo; con Gradio 5.50.0 sí se puede via
+  `gr.update`. La lección es que known-issues como esos deben
+  re-testearse cuando se hace un upgrade de stack.
+- **Markdown corto > tab nuevo**: Elvis pidió instrucciones "no muy
+  extensas". Un tab "Help/Instructions" habría exigido que el usuario
+  lo clickee proactivamente, y el espacio invitaría a llenar de más.
+  El markdown corto en el flujo natural input → slider lo lee TODO
+  el mundo, queda en sintonía con la decisión del Ciclo 5.7 de
+  mantener la UX minimalista.
+
+### Limitaciones honestas / known issues
+
+- **Los demás labels (image upload, botones de rotación rápida
+  `+5°/-90°`, tabs `"Binary"/"Cobb Angle"`, botón `"Analyze"`)
+  siguen hardcoded en inglés**. El Ciclo 6.2 cerró el slider y el
+  Reset (los 2 más "instructivos"); los otros son símbolos/términos
+  universales o nombres propios de los tabs. Un "Ciclo 6.4 — i18n
+  Nivel C completo" puede limpiarlos si Elvis lo prioriza.
+- **Validación visual definitiva pendiente de Elvis** en el browser
+  (https://huggingface.co/spaces/ElvLandau/spine-segmentation):
+  confirmar visualmente que el nuevo markdown aparece donde se
+  diseñó, que el toggle ES→EN retraduce slider + Reset, y que el
+  espacio no empuja el botón Analyze fuera del viewport en pantallas
+  pequeñas. El smoke remoto verificó el flujo lógico pero no el
+  rendering visual.
+- **El bug `T6-T5` (orden upper/lower en `assign_vertebra_names_to_curves`)
+  sigue pendiente** — reagendado a Ciclo 6.3 con el UX cycle insertado
+  primero. Documentado tanto aquí como en el `PROMPT_PROXIMO_CHAT.md`.
