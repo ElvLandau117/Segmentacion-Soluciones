@@ -1336,51 +1336,146 @@ def test_explain_reference_path_distinct_per_lang():
 
 
 # ----------------------------------------------------------------------------
-# Ciclo 5.10 — convexity direction follows patient-anatomy convention
+# Ciclo 6.1 — chord signed-area convention for curve direction
+# (replaces the Ciclo 5.10 midpoint-slope ternary)
 # ----------------------------------------------------------------------------
 
-def test_curve_direction_uses_patient_anatomy_convention():
-    """Ciclo 5.10 regression pin for the lateral-convexity convention.
+def test_curve_direction_synthetic_parabola_convex_right_patient():
+    """Parabola bulging toward viewer-LEFT must report 'right' (patient).
 
-    AP radiographs follow the mirror rule: the patient's RIGHT side
-    appears on the VIEWER's LEFT side of the image. Clinicians always
-    report laterality from the patient's anatomy, never from the
-    viewer's perspective.
-
-    Before Ciclo 5.10, ``_curve_direction`` returned viewer-side labels.
-    Our medical collaborator flagged case ``S_158`` of the MaIA dataset
-    (anatomically right-convex, reported as "convexidad izquierda") on
-    2026-05-20. The fix swaps the right ↔ left branches of the slope
-    ternary so the returned label matches the radiological reading.
-
-    This test pins the post-fix mapping so a future refactor cannot
-    silently re-invert the convention.
+    Coordinate convention used by the cobb pipeline: x grows toward
+    the viewer's right, y grows downward. A parabola of the form
+    ``x = 50 + 0.005*(y-50)**2`` has its minimum x at y=50 (the
+    apex), so the curve bulges to the LEFT of the viewer between the
+    two endpoints. By the AP mirror rule, viewer-left = patient-right
+    -> expected convexity is 'right'.
     """
     import numpy as np
 
     from spine_segmentation.evaluation.cobb_angle import _curve_direction
 
-    # Clearly negative midpoint slope.
-    dx_dy_neg = np.array([0.0, -0.5, -1.0, -0.5, 0.0], dtype=np.float32)
-    assert _curve_direction(dx_dy_neg, ip_a=0, ip_b=4) == "left", (
-        "post-Ciclo-5.10: negative midpoint slope must return 'left' "
-        "(patient anatomy). Before the fix this returned 'right'."
+    y = np.linspace(0, 100, 101)
+    x = 50 + 0.005 * (y - 50) ** 2
+    assert _curve_direction(x, y, ip_a=0, ip_b=100) == "right"
+
+
+def test_curve_direction_synthetic_parabola_convex_left_patient():
+    """Parabola bulging toward viewer-RIGHT must report 'left' (patient).
+
+    Mirror of the previous test: ``x = 50 - 0.005*(y-50)**2`` has its
+    maximum x at y=50, so the curve bulges to the RIGHT of the viewer.
+    Viewer-right = patient-left -> expected convexity is 'left'.
+    """
+    import numpy as np
+
+    from spine_segmentation.evaluation.cobb_angle import _curve_direction
+
+    y = np.linspace(0, 100, 101)
+    x = 50 - 0.005 * (y - 50) ** 2
+    assert _curve_direction(x, y, ip_a=0, ip_b=100) == "left"
+
+
+def test_curve_direction_s_shape_returns_opposite_lateralities():
+    """Canary of Ciclo 6.1: an S-shape must report opposite convexities
+    for the two curves separated by an inflection point.
+
+    Two curves separated by an inflection point have OPPOSITE
+    convexity by geometric definition of the IP. Under the Ciclo 5.10
+    midpoint-slope ternary this property did not hold in general
+    (the sweep over 12 cases on 2026-05-22 found 5 of 7 S-shape
+    detections reporting the same laterality for both curves), which
+    is the bug Ciclo 6.1 was opened to fix. This test FAILS under
+    the Ciclo 5.10 implementation.
+    """
+    import numpy as np
+
+    from spine_segmentation.evaluation.cobb_angle import _curve_direction
+
+    # Ideal S-shape: sinusoid crossing the chord at y=0, y=100, y=200.
+    y = np.linspace(0, 200, 201)
+    x = 50 + 8 * np.sin(2 * np.pi * y / 200)
+    top = _curve_direction(x, y, ip_a=0, ip_b=100)
+    bottom = _curve_direction(x, y, ip_a=100, ip_b=200)
+    assert top in {"left", "right"}, top
+    assert bottom in {"left", "right"}, bottom
+    assert top != bottom, (
+        f"S-shape sub-curves must have opposite laterality "
+        f"(top={top!r}, bottom={bottom!r}); see Ciclo 6.1 addendum."
     )
 
-    # Clearly positive midpoint slope.
-    dx_dy_pos = np.array([0.0, 0.5, 1.0, 0.5, 0.0], dtype=np.float32)
-    assert _curve_direction(dx_dy_pos, ip_a=0, ip_b=4) == "right", (
-        "post-Ciclo-5.10: positive midpoint slope must return 'right' "
-        "(patient anatomy). Before the fix this returned 'left'."
+
+def test_curve_direction_strong_curve_with_near_vertical_chord_still_works():
+    """Strongly curved spine with a near-vertical chord must still
+    classify, not collapse to 'unknown' or 'neutral'.
+
+    Construct a sharp curve with both inflection points at x=50 but
+    an apex at x=20 in the middle. The chord is exactly vertical
+    (chord_dx = 0), which is the worst case for any algorithm that
+    naively normalizes by chord direction. Expected: 'right' (apex
+    bulges to viewer-left = patient-right).
+    """
+    import numpy as np
+
+    from spine_segmentation.evaluation.cobb_angle import _curve_direction
+
+    y = np.linspace(0, 100, 101)
+    # Parabola with extremes at x=50 and apex at x=20.
+    x = 50.0 - 30.0 * (1.0 - ((y - 50.0) / 50.0) ** 2)
+    assert _curve_direction(x, y, ip_a=0, ip_b=100) == "right"
+
+
+def test_curve_direction_below_threshold_returns_neutral():
+    """A near-straight spine must collapse to 'neutral', and the
+    ``neutral_threshold_px2`` parameter must be a real knob.
+
+    Construct a parabola with a very small coefficient so the signed
+    area between curve and chord is well under the 50-px^2 default
+    threshold but is NOT exactly zero (a purely linear curve would
+    have signed_area = 0 and bypass the threshold check entirely).
+    """
+    import numpy as np
+
+    from spine_segmentation.evaluation.cobb_angle import _curve_direction
+
+    y = np.linspace(0, 100, 101)
+    # Tiny parabola: max x=50 at y=50, min x=49.75 at the extremes.
+    # Bulge is to viewer-right (apex x is bigger than extremes) ->
+    # patient-left at threshold=0.
+    x = 50.0 - 0.0001 * (y - 50.0) ** 2
+    # Default threshold (50 px^2) is well above the tiny signed area
+    # (~16.7 px^2 by construction) -> neutral.
+    assert _curve_direction(x, y, ip_a=0, ip_b=100) == "neutral"
+    # Lowering the threshold past the signed area exposes the actual
+    # convexity.
+    forced = _curve_direction(
+        x, y, ip_a=0, ip_b=100, neutral_threshold_px2=1e-9,
     )
+    assert forced == "left", forced
 
-    # Near-zero slope still collapses to neutral (unchanged by the fix).
-    dx_dy_zero = np.array([0.0, 1e-5, 0.0, -1e-5, 0.0], dtype=np.float32)
-    assert _curve_direction(dx_dy_zero, ip_a=0, ip_b=4) == "neutral"
 
-    # Bad indices still return "unknown" (unchanged).
-    assert _curve_direction(dx_dy_neg, ip_a=4, ip_b=2) == "unknown"
-    assert _curve_direction(dx_dy_neg, ip_a=0, ip_b=99) == "unknown"
+def test_curve_direction_invalid_indices_and_degenerate_chord_return_unknown():
+    """Edge cases all collapse cleanly to 'unknown' rather than
+    crashing or returning a bogus laterality.
+    """
+    import numpy as np
+
+    from spine_segmentation.evaluation.cobb_angle import _curve_direction
+
+    y = np.linspace(0, 100, 101)
+    x = 50.0 + 0.005 * (y - 50.0) ** 2
+
+    # ip_b <= ip_a -> unknown
+    assert _curve_direction(x, y, ip_a=80, ip_b=20) == "unknown"
+    # ip_b out of range -> unknown
+    assert _curve_direction(x, y, ip_a=0, ip_b=9999) == "unknown"
+    # ip_a negative -> unknown
+    assert _curve_direction(x, y, ip_a=-1, ip_b=10) == "unknown"
+    # Length mismatch -> unknown
+    assert _curve_direction(x[:50], y, ip_a=0, ip_b=40) == "unknown"
+    # Degenerate chord (both IPs at the same point) -> unknown
+    x_deg = np.full(101, 50.0)
+    y_deg = np.full(101, 25.0)
+    assert _curve_direction(x_deg, y_deg, ip_a=0, ip_b=100) == "unknown"
 
 
 # ----------------------------------------------------------------------------
