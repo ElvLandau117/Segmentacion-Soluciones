@@ -55,45 +55,111 @@ def _cobb_between_inflection_points(dx_dy: np.ndarray, ip_a: int, ip_b: int) -> 
     return float(abs(np.degrees(np.arctan((m1 - m2) / denom))))
 
 
-def _curve_direction(dx_dy: np.ndarray, ip_a: int, ip_b: int) -> str:
-    """Convexity direction of a curve between two inflection points.
+def _curve_direction(
+    x_eval: np.ndarray,
+    y_eval: np.ndarray,
+    ip_a: int,
+    ip_b: int,
+    neutral_threshold_px2: float = 50.0,
+) -> str:
+    """Convexity direction of a curve between two inflection points,
+    expressed in CLINICAL / PATIENT-ANATOMY convention.
 
-    Returns ``"right"``, ``"left"``, ``"neutral"``, or ``"unknown"``,
-    expressed in **CLINICAL / PATIENT-ANATOMY convention** — the standard
-    for radiological reports.
+    Returns ``"right"``, ``"left"``, ``"neutral"``, or ``"unknown"``.
 
-    Convention reminder (Ciclo 5.10): AP radiographs follow the
-    "mirror" rule. The patient is imagined facing the viewer, so the
-    patient's RIGHT side appears on the VIEWER's LEFT side of the image
-    (and vice-versa). A clinician reading a radiograph always reports
-    laterality from the patient's anatomy, never from the viewer's
-    perspective.
+    Convention reminder (kept from Ciclo 5.10): AP radiographs follow
+    the "mirror" rule. The patient is imagined facing the viewer, so
+    the patient's RIGHT side appears on the VIEWER's LEFT side of the
+    image and vice-versa. A clinician reading a radiograph always
+    reports laterality from the patient's anatomy, never from the
+    viewer's perspective.
 
-    Implementation: the sign of the midpoint slope of our ``x = f(y)``
-    spline maps to viewer-side convexity (sign convention determined
-    empirically against real cases). Before Ciclo 5.10 this function
-    returned the viewer-perspective label, which produced reports like
-    "convexidad izquierda" for cases that any clinician reading the
-    radiograph would call right-convex (e.g. ``S_158`` of the MaIA
-    dataset, flagged by our medical collaborator on 2026-05-20).
+    Algorithm (Ciclo 6.1, replaces the Ciclo 5.10 midpoint-slope
+    proxy): the convexity direction is defined as the side toward
+    which the apex of the curve protrudes RELATIVE TO THE CHORD that
+    joins the two inflection points. Geometrically, this is the sign
+    of the signed area between the curve and the chord, computed as
+    the sum of the perpendicular displacement of each interior curve
+    sample relative to the chord (2D cross product, normalized by
+    chord length).
 
-    The Ciclo 5.10 fix swaps the right ↔ left mapping so the returned
-    label matches the radiological convention. See test
-    ``test_curve_direction_uses_patient_anatomy_convention`` for the
-    regression pin.
+    Why we replaced the Ciclo 5.10 implementation:
 
-    Returns "unknown" if the indices are bad.
+        * That version used ``dx_dy[mid_idx]`` (spline slope at the
+          geometric midpoint between the two IPs) as a proxy for the
+          convexity sign. The spline slope crosses zero AT THE APEX
+          of the curve, not at the geometric midpoint, so the sign
+          at midpoint depends on the asymmetry of the curve (where
+          the apex sits inside ``[ip_a, ip_b]``) — NOT on the
+          anatomic convexity.
+        * Empirical consequence: in S-shape cases (e.g. the medical
+          reviewer report of 2026-05-22 with two curves separated by
+          an inflection), both curves were reported as the same
+          laterality. That is anatomically impossible by definition
+          of an inflection point.
+        * The chord signed-area approach is rotation-invariant,
+          apex-position-invariant, and gives opposite signs on
+          opposite sides of any inflection in the spline.
+
+    Edge cases:
+
+        * ``ip_b <= ip_a`` or out-of-range indices → ``"unknown"``.
+        * Degenerate chord (both IPs at the same point) → ``"unknown"``.
+        * ``len(x_eval) != len(y_eval)`` → ``"unknown"``.
+        * ``|signed_area| < neutral_threshold_px2`` → ``"neutral"``.
+
+    The signed-area threshold (default 50 px²) is calibrated against
+    the 500-sample grid used by ``_cobb_from_binary_single_pass``.
+    Values below this correspond to a mean perpendicular displacement
+    < 0.1 px over the chord — practically straight.
+
+    See tests:
+
+        * ``test_curve_direction_synthetic_parabola_*`` for the unit
+          contract.
+        * ``test_curve_direction_s_shape_returns_opposite_lateralities``
+          for the S-shape regression that motivated Ciclo 6.1.
+        * ``test_curve_direction_matches_maia_ground_truth_*`` for
+          the anchored regression against real dataset cases.
     """
-    if ip_b <= ip_a or ip_b >= len(dx_dy):
+    n = len(x_eval)
+    if n != len(y_eval):
         return "unknown"
-    mid_idx = (ip_a + ip_b) // 2
-    mid_slope = float(dx_dy[mid_idx])
-    if abs(mid_slope) < 1e-3:
+    if ip_a < 0 or ip_b <= ip_a or ip_b >= n:
+        return "unknown"
+
+    x0 = float(x_eval[ip_a])
+    y0 = float(y_eval[ip_a])
+    x1 = float(x_eval[ip_b])
+    y1 = float(y_eval[ip_b])
+
+    chord_dx = x1 - x0
+    chord_dy = y1 - y0
+    chord_len = float(np.sqrt(chord_dx * chord_dx + chord_dy * chord_dy))
+    if chord_len < 1e-6:
+        return "unknown"
+
+    # Signed perpendicular displacement of each interior curve point
+    # relative to the chord. Using the 2D cross product:
+    #     signed_dist(i) = ((x_i - x0)*chord_dy - (y_i - y0)*chord_dx) / chord_len
+    # In our image coordinates (x grows toward viewer-right, y grows
+    # downward) the sign is positive when (x_i, y_i) lies on the
+    # viewer's RIGHT side of the chord.
+    interior_x = np.asarray(x_eval[ip_a:ip_b + 1], dtype=float)
+    interior_y = np.asarray(y_eval[ip_a:ip_b + 1], dtype=float)
+    signed_perp = (
+        (interior_x - x0) * chord_dy - (interior_y - y0) * chord_dx
+    ) / chord_len
+    signed_area = float(np.sum(signed_perp))
+
+    if abs(signed_area) < neutral_threshold_px2:
         return "neutral"
-    # Patient-anatomy convention (NOT viewer perspective). See docstring.
-    # Before Ciclo 5.10 this returned "right" / "left" in the opposite
-    # order — viewer-side convexity — which broke radiological reading.
-    return "left" if mid_slope < 0 else "right"
+    # Patient-anatomy convention (mirror rule for AP radiographs):
+    #   signed_area > 0 → curve bows toward viewer's RIGHT
+    #                    → patient's LEFT side → "left".
+    #   signed_area < 0 → curve bows toward viewer's LEFT
+    #                    → patient's RIGHT side → "right".
+    return "left" if signed_area > 0 else "right"
 
 
 def cobb_from_binary(
@@ -271,7 +337,7 @@ def _cobb_from_binary_single_pass(
                 "ip_lower": (float(x_eval[ip_b]), float(y_eval[ip_b])),
                 "slope_upper": float(dx_dy[ip_a]),
                 "slope_lower": float(dx_dy[ip_b]),
-                "direction": _curve_direction(dx_dy, ip_a, ip_b),
+                "direction": _curve_direction(x_eval, y_eval, ip_a, ip_b),
             })
 
         if not candidates:
