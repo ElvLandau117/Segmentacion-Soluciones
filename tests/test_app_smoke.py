@@ -1440,23 +1440,86 @@ def test_derive_visual_anchors_places_blobs_outside_spine():
         assert key in empty, f"fallback missing key: {key}"
 
 
-def test_pixel_to_figure_coords_handles_corners():
-    """Sanity: image (0, 0) maps to the top of the axes rect (figure y is
-    flipped vs image y); image (size, size) maps to the bottom-right."""
+def test_pixel_to_figure_coords_accounts_for_aspect_equal_centering():
+    """Ciclo 5.12: image (0, 0) must map to the TOP of the actual rendered
+    image rect, NOT the top of the ax rect. With aspect='equal' and an
+    ax rect taller than wide in inches, the imshow content is centered
+    vertically — image pixel y=0 sits ~0.085 figure-fraction below the
+    ax rect top.
+
+    Pre-Ciclo-5.12 the converter assumed the imshow filled the entire
+    ax_rect, putting arrow targets ~56 px above the actual blobs in
+    AX_CAM_RECT (2.928 in wide x 4.153 in tall, image rendered as
+    2.928 x 2.928 in square centered vertically)."""
     gen = _import_generator_helpers()
 
     rect = (0.21, 0.30, 0.26, 0.58)  # left, bottom, width, height
-    # Top-left of image -> top-left of axes rect in figure coords.
+
+    # The actual image bbox (computed by _imshow_bbox_in_figure for the
+    # default FIG_SIZE_IN = (11.26, 7.16) and img_aspect=1.0):
+    #   ax_w_in = 2.9276, ax_h_in = 4.1528 -> width-limited, square 2.9276
+    #   vertical margin = (4.1528 - 2.9276) / 2 = 0.6126 in = 0.0856 frac
+    #   image rect = (0.21, 0.3856, 0.26, 0.4089)
+    expected_image_top_fy = 0.30 + 0.0856 + 0.4089  # ~0.7944
+    expected_image_bottom_fy = 0.30 + 0.0856        # ~0.3856
+
+    # Top-left of image -> top-left of *image* rect (NOT ax rect top).
     fx, fy = gen._pixel_to_figure_coords(0, 0, rect, img_size=512)
-    assert fx == 0.21
-    assert abs(fy - (0.30 + 0.58)) < 1e-6  # = 0.88
+    assert abs(fx - 0.21) < 1e-6
+    assert abs(fy - expected_image_top_fy) < 1e-3, (
+        f"Ciclo 5.12: image (0,0) should map to fy~{expected_image_top_fy:.4f}, "
+        f"got {fy:.4f}. If the assertion fails by ~0.085 we are back to the "
+        f"pre-5.12 bug where the converter assumed the imshow filled the ax rect."
+    )
 
-    # Bottom-right of image -> bottom-right of axes rect.
+    # Bottom-right of image -> bottom-right of *image* rect.
     fx, fy = gen._pixel_to_figure_coords(512, 512, rect, img_size=512)
-    assert abs(fx - (0.21 + 0.26)) < 1e-6  # = 0.47
-    assert fy == 0.30
+    assert abs(fx - 0.47) < 1e-6
+    assert abs(fy - expected_image_bottom_fy) < 1e-3
 
-    # A pixel halfway down the spine should land halfway down the rect.
+    # Midpoint is preserved by the symmetric centering — same answer pre and
+    # post Ciclo 5.12, so this is a quick "did the formula explode?" check.
     fx, fy = gen._pixel_to_figure_coords(256, 256, rect, img_size=512)
-    assert abs(fx - (0.21 + 0.13)) < 1e-6   # 0.34
-    assert abs(fy - (0.30 + 0.29)) < 1e-6   # 0.59
+    assert abs(fx - 0.34) < 1e-6
+    assert abs(fy - 0.59) < 1e-3
+
+
+def test_imshow_bbox_centers_square_in_tall_rect():
+    """Ciclo 5.12: explicit pin for the aspect='equal' centering math.
+
+    AX_CAM_RECT (taller than wide) -> image fits width, centered vertically.
+    A hypothetical wider-than-tall rect -> image fits height, centered
+    horizontally. Empty mask / default fig size still produces valid output."""
+    gen = _import_generator_helpers()
+
+    fig_size_in = (11.26, 7.16)
+
+    # Width-limited path: AX_CAM_RECT
+    img_rect = gen._imshow_bbox_in_figure(
+        (0.21, 0.30, 0.26, 0.58), fig_size_in, img_aspect=1.0,
+    )
+    left, bottom, width, height = img_rect
+    assert abs(left - 0.21) < 1e-6
+    # Image width == ax width.
+    assert abs(width - 0.26) < 1e-6
+    # Image height = 0.26 * (11.26 / 7.16) = 0.4089... in figure fraction.
+    assert abs(height - 0.26 * (11.26 / 7.16)) < 1e-6
+    # Bottom is offset by half the empty vertical margin.
+    ax_h = 0.58
+    expected_bottom = 0.30 + (ax_h - height) / 2.0
+    assert abs(bottom - expected_bottom) < 1e-6
+
+    # Height-limited path: a 0.30 wide x 0.20 tall rect at 11.26 x 7.16 in
+    # is wider than tall (3.378 in wide, 1.432 in tall). For a square image:
+    #   img_h_in = 1.432, img_w_in = 1.432 -> centered horizontally.
+    img_rect2 = gen._imshow_bbox_in_figure(
+        (0.10, 0.20, 0.30, 0.20), fig_size_in, img_aspect=1.0,
+    )
+    left2, bottom2, width2, height2 = img_rect2
+    assert abs(bottom2 - 0.20) < 1e-6
+    assert abs(height2 - 0.20) < 1e-6
+    # Image width = 0.20 * (7.16 / 11.26) figure fraction.
+    expected_width2 = 0.20 * (7.16 / 11.26)
+    assert abs(width2 - expected_width2) < 1e-6
+    expected_left2 = 0.10 + (0.30 - expected_width2) / 2.0
+    assert abs(left2 - expected_left2) < 1e-6
