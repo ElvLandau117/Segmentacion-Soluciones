@@ -82,6 +82,9 @@ DIAGNOSIS_STRINGS = {
         "explain_title_confidence":  "Confianza (certeza del modelo)",
         "explain_colorbar_high":     "Alta",
         "explain_colorbar_low":      "Baja",
+        # Rotation controls (Ciclo 6.2 — i18n del slider + boton Reset)
+        "rotation_slider_label":   "Rotar imagen (grados). Negativo = sentido horario.",
+        "rotation_reset_button":   "Reiniciar",
     },
     "en": {
         # COBB block
@@ -138,6 +141,9 @@ DIAGNOSIS_STRINGS = {
         "explain_title_confidence":  "Confidence (model certainty)",
         "explain_colorbar_high":     "High",
         "explain_colorbar_low":      "Low",
+        # Rotation controls (Ciclo 6.2 — slider + Reset button i18n)
+        "rotation_slider_label":   "Rotate image (degrees). Negative = clockwise.",
+        "rotation_reset_button":   "Reset",
     },
 }
 
@@ -211,6 +217,35 @@ Upload a spinal X-ray radiograph to get:
 }
 
 
+# Compact usage instructions shown between the input image and the
+# rotation controls (Ciclo 6.2). Two pedagogical bullets: how to handle
+# tilted radiographs + what each output tab contains.
+INSTRUCTIONS_MARKDOWN = {
+    "es": """
+**¿La radiografia vino inclinada o de lado?** Usa el slider de abajo o
+los botones rapidos para enderezarla antes de hacer click en *Analyze* —
+el metodo del angulo de Cobb asume columna vertical y emitira un
+*ROTATION WARNING* si detecta tilt > 12°.
+
+**Que obtendras al analizar:** *Binary* = forma global de la columna ·
+*Vertebrae* = vertebras individuales coloreadas · *Cobb Angle* = angulo
++ curvas detectadas con su lateralidad · *Explainability* = mapas
+Grad-CAM y de confianza (que regiones miro el modelo).
+""",
+    "en": """
+**Did the X-ray come in tilted or sideways?** Use the slider below or
+the quick buttons to straighten it before clicking *Analyze* — the
+Cobb-angle method assumes a vertical spine and will emit a *ROTATION
+WARNING* if tilt > 12° is detected.
+
+**What you'll get when you analyze:** *Binary* = overall spine shape ·
+*Vertebrae* = individual color-coded vertebrae · *Cobb Angle* = angle +
+detected curves with their laterality · *Explainability* = Grad-CAM and
+confidence maps (which regions the model looked at).
+""",
+}
+
+
 def t(key: str, lang: str = DEFAULT_LANG) -> str:
     """Look up a UI string by key in the given language.
 
@@ -230,6 +265,12 @@ def header_markdown(lang: str = DEFAULT_LANG) -> str:
 def explain_markdown(lang: str = DEFAULT_LANG) -> str:
     """Return the Explainability-tab markdown in the given language."""
     return EXPLAIN_MARKDOWN.get(lang, EXPLAIN_MARKDOWN[DEFAULT_LANG])
+
+
+def instructions_markdown(lang: str = DEFAULT_LANG) -> str:
+    """Return the compact usage-instructions markdown in the given
+    language. Shown between the input image and the rotation controls."""
+    return INSTRUCTIONS_MARKDOWN.get(lang, INSTRUCTIONS_MARKDOWN[DEFAULT_LANG])
 
 
 def label_to_lang(label: str) -> str:
