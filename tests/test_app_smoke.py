@@ -1618,3 +1618,78 @@ def test_imshow_bbox_centers_square_in_tall_rect():
     assert abs(width2 - expected_width2) < 1e-6
     expected_left2 = 0.10 + (0.30 - expected_width2) / 2.0
     assert abs(left2 - expected_left2) < 1e-6
+
+
+# ----------------------------------------------------------------------------
+# Ciclo 6.2 — bilingual usage instructions + i18n of rotation slider/reset
+# ----------------------------------------------------------------------------
+
+def test_instructions_markdown_renders_in_both_languages():
+    """The new compact instructions block must render in both Spanish and
+    English and cover both pedagogical bullets (rotation + tab legend).
+
+    This pin prevents future refactors from accidentally dropping either
+    bullet, which would defeat the whole point of the cycle 6.2 cleanup.
+    """
+    import re
+
+    from spine_segmentation.deployment.i18n import instructions_markdown
+
+    es_raw = instructions_markdown("es")
+    en_raw = instructions_markdown("en")
+
+    # Both must be non-empty real markdown blocks, not the empty-string
+    # fallback or the literal key.
+    assert es_raw.strip(), "Spanish instructions markdown is empty"
+    assert en_raw.strip(), "English instructions markdown is empty"
+
+    # Collapse all whitespace (including hard line wraps inside markdown
+    # bold runs like "*ROTATION\nWARNING*") so the substring checks below
+    # are robust to the cosmetic line breaks in the source string.
+    es = re.sub(r"\s+", " ", es_raw)
+    en = re.sub(r"\s+", " ", en_raw)
+
+    # Bullet 1: rotation guidance must mention the Analyze action and
+    # the ROTATION WARNING the model emits when it detects tilt.
+    assert "Analyze" in es and "Analyze" in en
+    assert "ROTATION WARNING" in es and "ROTATION WARNING" in en
+
+    # Bullet 2: tab legend must reference all four output tabs by name
+    # (these strings match the tab labels rendered in app.py).
+    for tab_name in ("Binary", "Vertebrae", "Cobb Angle", "Explainability"):
+        assert tab_name in es, f"ES instructions missing {tab_name!r}"
+        assert tab_name in en, f"EN instructions missing {tab_name!r}"
+
+    # The two languages must NOT be identical strings (cheap sanity
+    # check that the EN entry is not a copy-paste of the ES entry).
+    assert es_raw != en_raw
+
+
+def test_rotation_slider_label_is_translated():
+    """The rotation slider label and the Reset button label must both
+    have non-trivial ES + EN entries in DIAGNOSIS_STRINGS (cycle 6.2).
+
+    Before 6.2 these were hardcoded in English directly in app.py. The
+    fix added them to i18n.py so the language toggle can rewrite them
+    live via gr.update(label=...) / gr.update(value=...).
+    """
+    from spine_segmentation.deployment.i18n import t
+
+    slider_es = t("rotation_slider_label", "es")
+    slider_en = t("rotation_slider_label", "en")
+    assert slider_es != "rotation_slider_label", (
+        "Spanish key fell through to the fallback — ES translation missing."
+    )
+    assert slider_en != "rotation_slider_label", (
+        "English key fell through to the fallback — EN translation missing."
+    )
+    # The Spanish label should mention the rotation direction in Spanish.
+    assert "horario" in slider_es or "grados" in slider_es
+
+    reset_es = t("rotation_reset_button", "es")
+    reset_en = t("rotation_reset_button", "en")
+    assert reset_es != "rotation_reset_button"
+    assert reset_en != "rotation_reset_button"
+    # English Reset should literally be "Reset"; Spanish should not.
+    assert reset_en == "Reset"
+    assert reset_es != "Reset"
